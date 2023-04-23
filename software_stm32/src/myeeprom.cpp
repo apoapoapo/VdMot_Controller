@@ -28,7 +28,7 @@
   Copyright (C) 2021 Lenti84  https://github.com/Lenti84/VdMot_Controller
 *END************************************************************************/
 
-#include "eeprom.h"
+#include "myeeprom.h"
 #include "hardware.h"
 #include "I2C_eeprom.h"		// freat library from https://github.com/RobTillaart/I2C_EEPROM
 #include "motor.h"

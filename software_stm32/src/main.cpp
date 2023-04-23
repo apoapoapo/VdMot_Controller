@@ -37,7 +37,11 @@
 #include "terminal.h"
 #include "communication.h"
 #include "temperature.h"
-#include "eeprom.h"
+#include "myeeprom.h"
+
+#ifdef useKNX
+#include "myknx.h"
+#endif  
 #include "otasupport.h"
 #include "STM32TimerInterrupt.h"      
 #ifdef useCan
@@ -46,6 +50,7 @@
 #ifdef useRS485
   #include "rs485.h"
 #endif
+
 
 //using Matthias Hertel driver https://github.com/mathertel/LiquidCrystal_PCF8574
 //LiquidCrystal_PCF8574 lcd(0x27);  // set the LCD address to 0x27 for a 16 chars and 2 line display
@@ -147,6 +152,10 @@ void setup_system() {
     // rs485
     //rs485_setup();          // rs485 hardware testcode setup
   #endif
+  
+  #ifdef useKNX
+    knx_setup();
+  #endif
 
   // hardware timer for motor loop
   if (ITimer1.attachInterruptInterval(10 * 1000, valve_loop))
@@ -160,6 +169,7 @@ void setup_system() {
       COMM_DBG.println(F("Can't set ITimer1. Select another freq. or timer"));
     #endif
   }
+
 }
 
 
@@ -188,7 +198,6 @@ void loop_system() {
 
     digitalWrite(LED, !digitalRead(LED));   // toggle LED    
     eepromloop();
-
   }
 
 
@@ -226,8 +235,14 @@ void loop_system() {
     //eepromloop();
 
     //mycan_loop();         // can hardware testcode
-
+ 
     //rs485_loop();         // rs485 hardware testcode
+
+#ifdef useKnx
+    knx_loop();
+#endif
+
+
 
     // while(Serial.available()>0) {
     //   int testchar;
