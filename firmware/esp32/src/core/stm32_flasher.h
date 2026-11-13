@@ -9,8 +9,14 @@
  *     jumps to the ROM bootloader. Both the legacy 1.x and the v2 STM32
  *     firmware support this. BOOT0 is not wired to the ESP32 on the C2/C3
  *     boards, so this is the normal path.
+ *     If the reset does not reach the STM32 (seen on some boards), the user
+ *     is asked to press the RESET button of the BlackPill while the ESP32
+ *     keeps sending the request for 30 s.
  *  3. BOOT0 high + reset: only works if BOOT0 is wired (solder pad next to
  *     the ESP32 connector) or the BOOT0 button is held.
+ *
+ * After a successful update the new firmware is started with the
+ * bootloader's GO command (and a reset), so no reset line is required.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
@@ -86,10 +92,11 @@ class Stm32Flasher
     static void runApplication(BootPort &port);
 
   private:
-    bool enterBootloader(BootPort &port);
+    bool enterBootloader(BootPort &port, Progress progress, void *ctx);
+    bool go(BootPort &port);
     bool probeSync(BootPort &port);
-    bool softwareEntry(BootPort &port, uint32_t settle_ms, uint32_t interval_ms, int sends,
-                       uint32_t boot_ms);
+    bool softwareEntry(BootPort &port, bool do_reset, uint32_t settle_ms, uint32_t interval_ms,
+                       int sends, uint32_t boot_ms);
     void note(const char *fmt, ...);
     bool boot0Entry(BootPort &port);
     bool command(BootPort &port, uint8_t cmd, uint32_t timeout_ms = 1000);

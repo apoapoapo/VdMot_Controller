@@ -54,6 +54,37 @@ static void test_software_entry_without_boot0(void)
     TEST_ASSERT_EQUAL_HEX8_ARRAY(img.data.data(), bl.flash.data(), img.data.size());
 }
 
+/* the user presses RESET when the flasher asks for it */
+static void pressResetWhenAsked(void *ctx, uint8_t, const char *phase)
+{
+    if (strstr(phase, "RESET") != nullptr) {
+        static_cast<FakeBootloader *>(ctx)->pressReset();
+    }
+}
+
+static void test_manual_reset_when_nrst_is_not_wired(void)
+{
+    FakeBootloader bl;
+    bl.boot0_wired = false;
+    bl.reset_wired = false; /* jumper X20 open */
+    MemImage img = makeImage(12000);
+    Stm32Flasher f;
+    TEST_ASSERT_EQUAL(FlashResult::Ok, f.flash(bl, img, pressResetWhenAsked, &bl));
+    TEST_ASSERT_EQUAL_INT(1, bl.software_entries);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(img.data.data(), bl.flash.data(), img.data.size());
+    /* started with GO, no reset line needed */
+    TEST_ASSERT_EQUAL_INT(1, bl.go_count);
+    TEST_ASSERT_FALSE(bl.in_bootloader);
+    TEST_ASSERT_NOT_NULL(strstr(f.trace(), "manual:"));
+    TEST_ASSERT_NOT_NULL(strstr(f.trace(), "go: ok"));
+
+    /* nobody presses the button */
+    FakeBootloader bl2;
+    bl2.boot0_wired = false;
+    bl2.reset_wired = false;
+    TEST_ASSERT_EQUAL(FlashResult::NoBootloader, f.flash(bl2, img));
+}
+
 static void test_already_in_bootloader(void)
 {
     FakeBootloader bl;
@@ -170,6 +201,7 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_flash_and_verify);
     RUN_TEST(test_software_entry_without_boot0);
+    RUN_TEST(test_manual_reset_when_nrst_is_not_wired);
     RUN_TEST(test_already_in_bootloader);
     RUN_TEST(test_boot0_fallback_for_blank_chip);
     RUN_TEST(test_large_image_erases_more_sectors);

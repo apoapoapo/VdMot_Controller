@@ -106,7 +106,9 @@ if(!formsDone){$('chans').innerHTML=s.valves.map(v=>`<label style="display:inlin
 if(!$('chans').contains(document.activeElement))s.valves.forEach(v=>{$('chans').querySelector(`[value="${v.ch}"]`).checked=v.mode!==0});
 formsDone=true;
 const p=s.esp.previous;$('prev').textContent=p?`Previous ESP32 firmware in the other slot: ${p.project} ${p.version} (${p.date})`:'No previous ESP32 firmware';$('rb').disabled=!p;
-const u=s.update;if(u.active||u.result){$('prog').value=u.percent;$('upd').textContent=`STM32 update: ${u.phase} ${u.percent}% ${u.result||''}`;$('updd').textContent=u.detail?('Bootloader entry: '+u.detail):''}
+const u=s.update;if(u.active||u.result){$('prog').value=u.percent;$('upd').textContent=`STM32 update: ${u.phase} ${u.percent}% ${u.result||''}`;
+const ask=u.active&&u.phase.indexOf('RESET')>=0;$('upd').className=ask?'warn':'mut';$('upd').style.fontWeight=ask?'700':'';
+if(ask)$('upd').textContent='Press the RESET button on the STM32 (BlackPill) now – waiting up to 30 s';$('updd').textContent=u.detail?('Bootloader entry: '+u.detail):''}
 const d=Object.assign({},s.link.stats,s.diag||{});$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
 $('log').innerHTML=s.log.slice().reverse().map(e=>`<tr><td class=mut>${(e.ms/1000).toFixed(0)} s</td><td>${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
 refresh();setInterval(refresh,2000);

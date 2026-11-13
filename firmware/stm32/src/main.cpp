@@ -47,6 +47,9 @@ vdm::Controller *controller = nullptr;
 void setup()
 {
     board::safeOutputs();
+    /* started by the bootloader's GO command: undo its memory remap */
+    __HAL_RCC_SYSCFG_CLK_ENABLE();
+    __HAL_SYSCFG_REMAPMEMORY_FLASH();
     uint8_t reset_cause = board::readResetCause();
 
     pinMode(pinNametoDigitalPin(board::kLed), OUTPUT);

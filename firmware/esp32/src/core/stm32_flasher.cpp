@@ -20,6 +20,8 @@ constexpr uint8_t kCmdGetId = 0x02;
 constexpr uint8_t kCmdRead = 0x11;
 constexpr uint8_t kCmdWrite = 0x31;
 constexpr uint8_t kCmdExtErase = 0x44;
+constexpr uint8_t kCmdGo = 0x21;
+constexpr uint32_t kManualWindowMs = 30000;
 constexpr uint32_t kEraseTimeoutMs = 30000;
 
 /* STM32F4 sector layout: 4 x 16 KiB, 1 x 64 KiB, then 128 KiB sectors */
@@ -117,16 +119,18 @@ bool Stm32Flasher::probeSync(BootPort &port)
     return r == kAck || r == kNack; /* NACK: already synchronised */
 }
 
-bool Stm32Flasher::softwareEntry(BootPort &port, uint32_t settle_ms, uint32_t interval_ms,
-                                 int sends, uint32_t boot_ms)
+bool Stm32Flasher::softwareEntry(BootPort &port, bool do_reset, uint32_t settle_ms,
+                                 uint32_t interval_ms, int sends, uint32_t boot_ms)
 {
     static const char kRequest[] = "DEADBEEF\r\n";
     static const char kAnswer[] = "BEEFIT";
     port.setBoot0(false);
     port.begin(115200, true);
-    port.setReset(true);
-    port.delayMs(150);
-    port.setReset(false);
+    if (do_reset) {
+        port.setReset(true);
+        port.delayMs(150);
+        port.setReset(false);
+    }
     port.delayMs(settle_ms);
     port.drain();
     size_t match = 0;
@@ -182,7 +186,12 @@ bool Stm32Flasher::boot0Entry(BootPort &port)
     return false;
 }
 
-bool Stm32Flasher::enterBootloader(BootPort &port)
+bool Stm32Flasher::go(BootPort &port)
+{
+    return command(port, kCmdGo) && sendAddress(port, kFlashBase);
+}
+
+bool Stm32Flasher::enterBootloader(BootPort &port, Progress progress, void *ctx)
 {
     trace_[0] = '\0';
     port.setBoot0(false);
@@ -194,14 +203,20 @@ bool Stm32Flasher::enterBootloader(BootPort &port)
     }
     /* 1st: timing of the legacy 1.x ESP32 firmware (known to work on the
      * boards), 2nd: faster timing */
-    note("sw1: ");
-    if (softwareEntry(port, 1500, 1000, 4, 1500)) {
+    /* 1st: reset by the ESP32, timing of the legacy 1.x ESP32 firmware */
+    note("sw: ");
+    if (softwareEntry(port, true, 1500, 1000, 4, 1500)) {
         return true;
     }
-    note("sw2: ");
-    if (softwareEntry(port, 300, 250, 10, 500)) {
+    /* 2nd: the reset does not reach the STM32 - ask the user to press the
+     * RESET button and keep sending the request meanwhile */
+    report(progress, ctx, 0, "press RESET on the STM32");
+    note("manual: ");
+    if (softwareEntry(port, false, 0, 200, static_cast<int>(kManualWindowMs / 200), 1500)) {
+        report(progress, ctx, 1, "connecting");
         return true;
     }
+    report(progress, ctx, 0, "connecting");
     return boot0Entry(port);
 }
 
@@ -329,7 +344,7 @@ FlashResult Stm32Flasher::flash(BootPort &port, ImageSource &image, Progress pro
     }
 
     report(progress, ctx, 0, "connecting");
-    if (!enterBootloader(port)) {
+    if (!enterBootloader(port, progress, ctx)) {
         runApplication(port);
         return FlashResult::NoBootloader;
     }
@@ -389,6 +404,9 @@ FlashResult Stm32Flasher::flash(BootPort &port, ImageSource &image, Progress pro
         report(progress, ctx, static_cast<uint8_t>(80 + 20 * (i + 1) / blocks), "verifying");
     }
 
+    if (result == FlashResult::Ok) {
+        note(go(port) ? "; go: ok" : "; go: no answer");
+    }
     runApplication(port);
     return result;
 }

@@ -21,6 +21,8 @@ class FakeBootloader : public vdm::BootPort
     bool boot0_wired = true;  /* BOOT0 reaches the STM32 */
     bool app_present = true;  /* an application with a DEADBEEF boot window runs */
     bool start_in_bootloader = false;
+    bool reset_wired = true; /* NRST reaches the STM32 */
+    int go_count = 0;
     int software_entries = 0;
     int nack_writes = 0;       /* NACK the next n write data phases */
     bool corrupt_read = false; /* flip a bit in read data */
@@ -62,17 +64,26 @@ class FakeBootloader : public vdm::BootPort
     }
     void setReset(bool a) override
     {
-        if (reset && !a) { /* released */
-            bool b0 = boot0 && boot0_wired;
-            in_bootloader = b0 && !silent;
-            state_ = St::Sync;
-            out_.clear();
-            app_window_ = !b0 && app_present;
-            app_match_ = 0;
-            if (!b0)
-                app_starts++;
+        if (reset_wired && reset && !a) { /* released */
+            restart();
         }
         reset = a;
+    }
+    /* the RESET button of the BlackPill */
+    void pressReset()
+    {
+        restart();
+    }
+    void restart()
+    {
+        bool b0 = boot0 && boot0_wired;
+        in_bootloader = b0 && !silent;
+        state_ = St::Sync;
+        out_.clear();
+        app_window_ = !b0 && app_present;
+        app_match_ = 0;
+        if (!b0)
+            app_starts++;
     }
     void init()
     {
@@ -146,7 +157,7 @@ class FakeBootloader : public vdm::BootPort
                 out_.push_back((uint8_t)chip_id);
                 ack(true);
                 state_ = St::Cmd;
-            } else if (cmd_ == 0x31 || cmd_ == 0x11) {
+            } else if (cmd_ == 0x31 || cmd_ == 0x11 || cmd_ == 0x21) {
                 state_ = St::Addr;
             } else if (cmd_ == 0x44) {
                 state_ = St::EraseHdr;
@@ -163,6 +174,13 @@ class FakeBootloader : public vdm::BootPort
                     x == buf_[4] && addr_ >= 0x08000000u && addr_ < 0x08000000u + flash.size();
                 ack(ok);
                 buf_.clear();
+                if (ok && cmd_ == 0x21) { /* GO: start the application */
+                    go_count++;
+                    in_bootloader = false;
+                    app_starts++;
+                    state_ = St::Sync;
+                    break;
+                }
                 state_ = !ok ? St::Cmd : (cmd_ == 0x31 ? St::Len : St::ReadLen);
             }
             break;

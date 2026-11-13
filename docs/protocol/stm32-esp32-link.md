@@ -46,6 +46,12 @@ compatible with the legacy 1.x firmware:
    `BEEFIT\r\n` and jumps to the ROM bootloader.
 3. The ESP32 then speaks the ST bootloader protocol (sync byte `0x7F`).
 
+If the reset does not reach the STM32 (jumper X20 open or reset circuit not
+populated), the ESP32 asks the user to press the RESET button of the
+BlackPill and keeps sending the request for 30 s. After a successful update
+the ESP32 starts the new firmware with the bootloader's GO command; the
+firmware sets its vector table itself (`USER_VECT_TAB_ADDRESS`).
+
 If the STM32 is already in the bootloader, step 1 is skipped. If no
 application answers (e.g. after an interrupted update), the ESP32 finally
 tries BOOT0 + reset; that only works if BOOT0 is wired via the solder pad or

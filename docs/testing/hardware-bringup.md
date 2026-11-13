@@ -46,6 +46,12 @@ every 5 minutes (it assumes a hang), which does no harm.
    line shows the detected chip. The ESP32 resets the STM32 and asks the
    running firmware (legacy 1.x or v2) to jump to the ROM bootloader
    ("DEADBEEF" handshake) – BOOT0 is not wired on the C2/C3 boards.
+   The reset only reaches the STM32 if jumper **X20 ("stm32 reset")** is
+   set and the reset circuit is populated. Otherwise the page asks you to
+   **press the RESET button on the BlackPill** – do so within 30 s. After
+   writing, the new firmware is started by the bootloader itself (GO
+   command), no reset needed. The line *Bootloader entry* shows what
+   happened in detail.
 3. If the STM32 has no working firmware any more (e.g. an update was
    interrupted while writing), the handshake cannot work: hold the **BOOT0
    button** on the BlackPill and click **Flash STM32** again; release it
