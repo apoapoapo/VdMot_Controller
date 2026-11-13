@@ -1,0 +1,13 @@
+{
+  "name": "vdm-protocol",
+  "version": "1.0.0",
+  "description": "VdMot Controller ESP32 <-> STM32 link protocol (COBS + CRC16 framing, message codecs)",
+  "license": "GPL-3.0-only",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "includeDir": "include",
+    "srcDir": "src",
+    "flags": ["-std=gnu11"]
+  }
+}

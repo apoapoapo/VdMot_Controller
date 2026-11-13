@@ -1,0 +1,171 @@
+# VdMot Controller – Firmware rebuild (v2)
+
+Date: 2026-11-13 · Status: planning
+
+This document records **why** the firmware is being rebuilt, **which decisions**
+have been made and **in which order** the work is done. The UART protocol is
+specified in [`../protocol/stm32-esp32-link.md`](../protocol/stm32-esp32-link.md).
+
+---
+
+## 1. Starting point
+
+The hardware (C2 revision, STM32F411 "BlackPill" WeAct V3.0, WT32-ETH01) is good.
+The existing firmware (v1.4.x) has structural problems that cannot be fixed with
+isolated patches. The most important ones (excerpt from the code review):
+
+| Area | Problem | Effect |
+|---|---|---|
+| STM32 motor | Command (`valvenr`, `command`, `poschangecmd`) is handed from main loop to the 10 ms ISR without protection | wrong valve / wrong travel, drift |
+| STM32 motor | Position is only accumulated nominally, counted pulses are never fed back; `scaler` is an integer; `deadzone` is unused and `unsigned` (underflow) | position drift |
+| STM32 motor | Undercurrent counter is cumulative instead of consecutive | valve is flagged "open circuit" and disappears |
+| STM32 motor | `delay(100)` in the ISR path (MUX switching) | current measurement stalls, UART bytes are lost |
+| STM32 | Calibration/position not persisted, EEPROM without version/CRC, no watchdog, no BOR | all valves re-learn after every boot; hangs never recover |
+| STM32 1-Wire | Bus index and DS18 index are mixed up, blocking ROM searches | temperatures assigned to the wrong valve |
+| UART protocol | Text based, no framing/CRC/sequence number, buffer overflows on both sides, only the first line in the buffer is processed, `gvlst` parser increments the index twice | lost or misassigned responses |
+| ESP32 | AsyncWebServer callbacks write global state without locks, `yieldTask()` runs the scheduler on the wrong thread, all watchdogs disabled | sporadic faults, hangs |
+| ESP32 config | NVS struct blobs without version/CRC | any layout change corrupts the configuration |
+| ESP32 MQTT/HA | No LWT/availability, client id = station name, actual position never published, discovery entities without data or without subscription, discovery blocks for ~20 s | unreliable Home Assistant integration |
+| ESP32 security | No endpoint is actually protected (reboot, OTA, config), SMTP password sent to the UI in clear text | – |
+| PI controller | Δt taken from `time()` (SNTP jump), start position set from a temperature instead of a percentage | integrator kicks |
+
+An incremental refactoring would touch almost every line. Therefore:
+**rebuild following the strangler pattern** – hardware knowledge and the useful
+algorithms (current-based endstop detection, back-EMF pulse counting, basic PI
+structure, STM32 update via ROM bootloader) are kept, the structure is not.
+
+---
+
+## 2. Decisions
+
+| # | Decision | Rationale |
+|---|---|---|
+| D1 | Rebuild in the **own fork** (`apoapoapo/VdMot_Controller`); new firmware lives in new directories; the old code stays untouched until it is replaced | history and authorship stay visible, no big bang |
+| D2 | License stays **GPLv3**; existing copyright notices are kept in any reused code, new files carry their own header plus the GPLv3 notice | required by the GPL for derived works |
+| D3 | Own versioning starting at **2.0.0** (SemVer), own GitHub releases in the fork; README credits upstream (Lenti84 / SurfGargano) | clear separation from the upstream 1.x releases |
+| D4 | STM32 = pure real-time actuator, ESP32 = logic/configuration/integration | one source of truth per concern |
+| D5 | New **binary UART protocol** (COBS + CRC16, sequence numbers, request/response + events), shared header for both sides | see protocol specification |
+| D6 | STM32 and ESP32 are always updated **together** (ESP flashes the STM via ROM bootloader); no compatibility with the 1.x text protocol | avoids transition code |
+| D7 | Integration: **MQTT / Home Assistant first**; KNX will be discussed separately later as its own adapter | HA is almost there, fastest benefit |
+| D8 | Primary target hardware **C2 + STM32F411**; F401 and C1 remain possible via build environments but are not primarily tested | hardware at hand |
+| D10 | On ESP failure the STM32 opens **all valves fully** after `link_timeout_s` (default 300 s) | heating keeps working, no frost risk; overheating is the lesser risk |
+| D11 | Automatic recalibration defaults stay as in 1.x (2000 moves / 7 days); both values and the failsafe behaviour are configurable in the web UI | no field experience yet with other values |
+| D9 | Code, comments, documentation, commit messages and issues are written in **English** | public repository |
+
+Open / later:
+
+- **KNX**: approach still open (KNX-IP from the ESP32 without an ETS product
+  database vs. a TP-UART transceiver with an ETS application, e.g. based on the
+  OpenKNX tooling). The earlier prototype (TP converter on the STM debug UART)
+  will not be continued.
+- **Additional 3.3 µF / 50 V capacitor on the ESP connector** (present on the
+  owner's board, purpose unknown). Most likely either a bulk capacitor for the
+  WT32-ETH01 supply (current spikes from WiFi/PHY → brown-out resets) or an RC
+  delay on the EN pin (known WT32-ETH01 boot issue, because GPIO0 is driven by
+  the LAN8720 clock). **Find out which pins it is connected to** and document it
+  in the hardware documentation.
+
+---
+
+## 3. Target repository layout
+
+```
+common/
+  protocol/            shared protocol library (C99, no Arduino dependency)
+    include/vdm/link.h   message ids, structures, error codes, defaults
+    include/vdm/crc16.h  CRC-16/CCITT-FALSE
+    include/vdm/cobs.h   COBS encode/decode
+    include/vdm/frame.h  frame builder and stream receiver
+    include/vdm/codec.h  message (de)serialization, little-endian, field by field
+    test/                Unity host tests (pio test -e native)
+firmware/
+  stm32/               new STM32 firmware (PlatformIO)
+    src/hal/           pins, timers, ADC, pulse counter, EEPROM, 1-Wire (only place using Arduino/HAL)
+    src/motor/         MotorChannel (state machine), ValveManager, calibration – hardware independent
+    src/sensors/       non-blocking 1-Wire scheduler, sensor list keyed by ROM id
+    src/link/          protocol server
+    src/storage/       EEPROM records with version + CRC
+    test/              Unity tests (env:native)
+  esp32/               new ESP32 firmware (PlatformIO)
+    src/core/          data model (mutex protected), event bus
+    src/link/          protocol client, STM32 update via ROM bootloader
+    src/config/        versioned configuration (JSON on LittleFS) + migrations
+    src/control/       PI controller (monotonic time base)
+    src/adapters/      web (REST + WebSocket), mqtt_ha, later knx
+    test/
+  webui/               web UI with a reproducible build (no mktfs.exe)
+docs/
+  protocol/            protocol specification
+  refactoring/         this document
+software_stm32/, software_esp32/   legacy code (v1.4.x), removed once replaced
+```
+
+Release binaries (`releases/`, `*.bin`) do not belong in the repository; they
+are attached to GitHub releases (built by CI).
+
+---
+
+## 4. Phases
+
+### Phase 0 – Foundation (done)
+- Directory layout, `.gitignore`, `.editorconfig`, clang-format.
+- Protocol specification (this package) → review → implement `common/protocol`.
+- Host tests (PlatformIO `env:native` + Unity) for COBS, CRC, codec.
+- GitHub Actions: builds for STM32 (F411/F401) and ESP32, host tests.
+- Firmware skeletons (`firmware/stm32`, `firmware/esp32`) that link the
+  protocol library: the STM32 puts all motor outputs into a safe state and
+  answers `HELLO`/`PING`; the ESP32 sends `HELLO` once per second and prints
+  the answer. Usable as a first link test on the hardware.
+- Legacy release binaries removed from the repository (they remain in the
+  git history and in the upstream releases).
+
+### Phase 1 – STM32 firmware (most critical part)
+- HAL layer; defined pin states immediately after reset (motors off, PSU off).
+- `MotorChannel` state machine with `tick()`; ISRs only deliver raw data
+  (pulse counter, current samples) via atomic/volatile hand-over.
+- Position tracking from counted pulses, separate factors for opening/closing,
+  dead zone taken into account, fixed point instead of an integer scaler.
+- Robust endstop/undercurrent detection (consecutive counters, plausibility limits).
+- Calibration data + last position persisted (EEPROM record, version + CRC,
+  wear-friendly). After boot: reference run instead of a full re-learn.
+- Non-blocking 1-Wire scheduler, sensors addressed only by ROM id.
+- IWDG, BOR level, reset cause, error counters.
+- Protocol server.
+- Host tests for the state machine, calibration evaluation, storage.
+- **Hardware test on the owner's board.**
+
+### Phase 2 – ESP32 core
+- FreeRTOS tasks with clear responsibilities instead of TaskManagerIO/`yieldTask`.
+- Data model + event bus, protocol client with retry/timeout/resync.
+- Versioned configuration with migration.
+- STM32 update via ROM bootloader (BOOT0/NRST driven by the ESP, as today).
+- REST API + WebSocket, real authentication.
+- PI controller with monotonic time base, proper anti-windup, staleness check.
+- Watchdogs enabled.
+
+### Phase 3 – MQTT / Home Assistant
+- LWT + birth message, `availability_topic`, client id derived from MAC.
+- `unique_id` from MAC + channel (stable across renames).
+- Discovery on connect and on `homeassistant/status = online`, non-blocking.
+- Per valve: `valve` (real position), `climate` (if PI control is active),
+  `sensor` (current, temperatures, counters as `total_increasing`), `button`
+  (calibrate), `binary_sensor` (fault), `number` with min/max/step.
+- JSON payloads + `value_template`; no more format variants.
+
+### Phase 4 – Web UI
+- New, small, built against the REST/WebSocket API; build step integrated into PlatformIO.
+
+### Phase 5 – KNX (after a separate discussion)
+- As an adapter on the data model (DPT 5.001 valve position, DPT 9.001
+  temperature, status/fault).
+
+---
+
+## 5. Test and acceptance criteria (excerpt)
+
+- 72 h endurance run with random targets: position error after a reference run < 2 %.
+- STM32 restart: no re-learn, only a reference run; positions correct.
+- Unplugging/replugging a valve: detected, fault reported, operation resumes.
+- Disturbed UART (dropped/corrupted bytes): no wrong action, resync < 1 s.
+- ESP32 restart: valves keep their position, HA briefly shows "unavailable".
+- Home Assistant: every entity has data, every command takes effect.

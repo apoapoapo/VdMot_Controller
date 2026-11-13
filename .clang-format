@@ -1,0 +1,12 @@
+# Applies to the v2 code in common/ and firmware/ only.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+BreakBeforeBraces: Linux
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+PointerAlignment: Right
+IndentCaseLabels: false
+SortIncludes: true
+IncludeBlocks: Preserve
