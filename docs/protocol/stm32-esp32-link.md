@@ -34,9 +34,28 @@ This document specifies the protocol on the UART link between the ESP32
 | Baud rate | 115200 (default); possibly 460800 later via `SET_LINK` – not part of v1 |
 | Reset / boot | The ESP32 drives the STM32's NRST (GPIO15) and BOOT0 (GPIO14), as today |
 
-The STM32 firmware is still updated via the **ROM bootloader** (AN3155) on the
-same UART: the ESP32 asserts BOOT0, pulses NRST and then speaks the ST
-bootloader protocol. The 3-second "DEADBEEF" window of firmware 1.x is dropped.
+The STM32 firmware is updated via the **ROM bootloader** (AN3155) on the
+same UART. **BOOT0 is not wired to the ESP32** on the C2/C3 boards (GPIO14
+only goes to an open solder pad), so the bootloader is entered by software,
+compatible with the legacy 1.x firmware:
+
+1. The ESP32 resets the STM32 (NRST) and sends `DEADBEEF\r\n` at
+   115200 baud **8E1** every 250 ms.
+2. During the first **2 seconds** after a reset the STM32 firmware listens
+   for this string (legacy 1.x: 3 seconds). On a match it answers
+   `BEEFIT\r\n` and jumps to the ROM bootloader.
+3. The ESP32 then speaks the ST bootloader protocol (sync byte `0x7F`).
+
+If the reset does not reach the STM32 (jumper X20 open or reset circuit not
+populated), the ESP32 asks the user to press the RESET button of the
+BlackPill and keeps sending the request for 30 s. After a successful update
+the ESP32 starts the new firmware with the bootloader's GO command; the
+firmware sets its vector table itself (`USER_VECT_TAB_ADDRESS`).
+
+If the STM32 is already in the bootloader, step 1 is skipped. If no
+application answers (e.g. after an interrupted update), the ESP32 finally
+tries BOOT0 + reset; that only works if BOOT0 is wired via the solder pad or
+the BOOT0 button of the BlackPill is held.
 
 ---
 
@@ -283,8 +302,8 @@ response `OK` only means "scheduled". The result arrives per channel as
 | `mask` | u16 | channels to stop |
 
 A running move or calibration is aborted, and pending jobs for these channels
-are discarded. An aborted move leaves the position inaccurate; the channel then
-gets the `POS_UNCERTAIN` flag (see 5.4).
+are discarded. Pulses are counted until the motor has come to rest, so the
+position stays known; the target is set to the position reached.
 
 #### `0x14 SET_CHANNELS`
 
@@ -300,8 +319,18 @@ Stored persistently.
 |---|---|---|
 | `mask` | u16 | channels whose connection is checked |
 
-Checks with a short test pulse (without changing the position) whether a motor
-is connected. The result arrives as `EVT_VALVE`.
+Checks whether a motor is connected with a short test move of 30 pulses
+(≈ 0.2 % of a stroke) in opening direction; if no pulse arrives (valve
+already fully open), the test is repeated in closing direction. The pulses
+are accounted for, so the position does not get lost. The result arrives as
+`EVT_VALVE`.
+
+The same detection runs automatically for every enabled channel after boot
+and for newly enabled channels. Channels that are `NOT_CONNECTED` are
+checked again after 1 minute, then at doubling intervals of up to 15
+minutes. A connected channel without calibration data is calibrated
+automatically. While a valve stands still it draws no current, so an
+unplugged valve is only noticed with its next move.
 
 #### `0x16 GET_VALVE_DETAIL`
 Request: `channel` (u8). Response:
@@ -336,8 +365,15 @@ Shared by all channels. Fields:
 | `opencircuit_ma10` | u16 | 5…100 | 20 | below this current "no motor" is assumed (0.1 mA) … |
 | `opencircuit_ms` | u16 | 100…5000 | 500 | … if it persists this long **without interruption** |
 | `move_timeout_s` | u16 | 10…600 | 120 | maximum duration of a single move |
-| `min_stroke_counts` | u16 | 100…60000 | 3000 | minimum pulses for a valid stroke |
+| `min_stroke_counts` | u16 | 100…60000 | 2000 | minimum pulses for a valid stroke (HmIP-VdMot on the test board: ~3100–3800) |
 | `max_calib_retries` | u8 | 0…5 | 2 | retries after a failed calibration |
+
+Endstop detection: after the inrush blanking the filtered current is
+compared with `mean × factor/10` (capped at `endstop_abs_ma`); 20
+consecutive samples (1 kHz) above the threshold stop the motor. Without a
+learned mean (first calibration) the mean of the first 300 ms after the
+blanking is used. In addition a motor that draws current but delivers no
+pulse for 1 s has stalled, which also counts as an endstop.
 
 On `SET` all fields are validated. The first invalid field is reported with
 `ERR_RANGE` and its field index (0-based, in table order); nothing is applied
@@ -348,6 +384,13 @@ in that case. The values are stored persistently. Response to `SET`:
 
 Sensors are always addressed by their **ROM id (u8[8], bus order, byte 0 =
 family code)**. List positions have no lasting meaning.
+
+The STM32 searches the bus after boot and on `SENSOR_SCAN`, then measures
+every `sensor_interval_s`: one broadcast Convert T for all devices, then
+each device is read individually. Supported are DS18B20 (family `0x28`) and
+DS2438 (family `0x26`, temperature, VAD and VDD); other families are
+ignored. After an error the last valid value is kept, `status` tells what
+went wrong and `age_s` keeps growing. At most 32 devices are handled.
 
 #### `0x30 SENSOR_SCAN`
 Request: empty. Starts a new bus search. Response `OK` or `ERR_BUSY`. The
@@ -392,7 +435,7 @@ ESP asks again with a higher `offset`.
 |---|---|---|
 | 0 | `CALIBRATED` | valid calibration data present |
 | 1 | `CALIB_PENDING` | calibration scheduled |
-| 2 | `POS_UNCERTAIN` | position not reliable (aborted move, boot without reference run) |
+| 2 | `POS_UNCERTAIN` | position not known (no reference run since boot, or lost after a fault) |
 | 3 | `AT_ENDSTOP` | endstop detected during the last move |
 | 4 | `FAILSAFE` | target comes from `failsafe_pos` |
 
@@ -404,12 +447,12 @@ Bits 5–7 are reserved (0).
 |---|---|---|
 | `0` | NONE | no fault |
 | `1` | OPEN_CIRCUIT | no current, motor unplugged |
-| `2` | BLOCKED | endstop reached well before the expected end of stroke, repeatedly |
+| `2` | BLOCKED | endstop reached more than 15 % before the expected end of stroke, twice in a row (a single occurrence schedules a calibration) |
 | `3` | TIMEOUT | `move_timeout_s` exceeded |
-| `4` | OVERCURRENT | `endstop_abs_ma` exceeded right after the inrush blanking |
+| `4` | OVERCURRENT | current above the hard limit of 250 mA for 3 ms (e.g. short circuit), checked from the first sample on |
 | `5` | CALIB_FAILED | stroke < `min_stroke_counts` after all retries |
-| `6` | NO_PULSES | current flows but no back-EMF pulses arrive |
-| `7` | COUNT_MISMATCH | pulses during the reference run differ by > 15 % |
+| `6` | NO_PULSES | current flows but not a single back-EMF pulse arrives (detection in both directions, or a move to an intermediate position) |
+| `7` | COUNT_MISMATCH | the reference run counted more than the learned stroke of its direction + 15 %; reported in `last_fault`, a calibration is scheduled |
 
 #### `SensorValue` (16 bytes)
 
@@ -437,13 +480,13 @@ Request: empty. Response:
 | `rx_overflow` | u16 | |
 | `rx_bad_version` | u16 | |
 | `rx_duplicate` | u16 | repetitions answered via 4.3 |
-| `uart_hw_err` | u16 | framing or overrun errors of the UART hardware |
+| `uart_hw_err` | u16 | framing or overrun errors of the UART hardware (not implemented yet: 0) |
 | `ow_crc_err` | u16 | |
 | `ow_bus_err` | u16 | bus short circuit, no presence pulse |
 | `eeprom_writes` | u32 | |
 | `eeprom_err` | u16 | |
 | `loop_max_us` | u32 | longest main loop pass since boot |
-| `mcu_temp_c10` | i16 | internal STM32 temperature, 0.1 °C |
+| `mcu_temp_c10` | i16 | internal STM32 temperature, 0.1 °C (not implemented yet: 0) |
 
 #### `0x41 CLEAR_DIAG`
 Request: empty. Resets the counters; uptime and the EEPROM counters are kept.
@@ -474,16 +517,31 @@ operation.
 - The STM32 keeps operating with its last stored configuration (system, motor,
   channels) even without the ESP.
 - After boot:
-  1. Every enabled channel with valid calibration performs a **reference run**
-     towards closed until the endstop.
-  2. Then it moves to `startup_pos`.
-  3. If the pulse count of the reference run deviates from the expected value,
-     the STM32 sets `POS_UNCERTAIN` and schedules a calibration.
+  1. Every enabled channel is checked with a detection move (see `DETECT`).
+  2. A connected channel with valid calibration performs a **reference run**
+     to the **nearer endstop**, judged by the last stored target (≥ 50 %:
+     open endstop, otherwise closed endstop). A valve left at 100 % only
+     presses against its open endstop briefly. The detection move of step 1
+     goes the other way, away from that endstop. A channel without
+     calibration is calibrated.
+  3. Then it moves to its target: `startup_pos`, or the last stored target
+     if `startup_pos` = `0xFFFF` (targets are stored at most every 10 minutes;
+     without any stored target the failsafe position is used).
+  4. If the reference run counts more pulses than the learned stroke of its
+     direction + 15 %, the STM32 reports `COUNT_MISMATCH` in `last_fault` and
+     schedules a calibration.
+- Only one motor moves at a time; channels with pending work report
+  `QUEUED`. The valve power supply is switched on 1 s before the first move
+  and off 10 s after the last one.
 - If `link_timeout_s` ≠ 0 and no valid request arrives for that long:
   - If `failsafe_pos` ≠ `0xFFFF`, every channel is moved there, with the
     `FAILSAFE` flag set.
-  - The first valid request afterwards ends the failsafe state. The targets
-    stay unchanged until the ESP sends new ones.
+  - The first valid request afterwards ends the failsafe state, before the
+    request itself is executed. The STM32 restores the targets it had
+    before the failsafe (the ESP32 may have restarted and lost them); a
+    target sent in that first request takes precedence. The ESP32 firmware
+    additionally resends its targets when it receives `EVT_LINK_TIMEOUT`.
+  - Failsafe targets are never stored in the EEPROM.
 
 ---
 

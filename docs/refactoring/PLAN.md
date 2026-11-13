@@ -120,28 +120,66 @@ are attached to GitHub releases (built by CI).
   git history and in the upstream releases).
 
 ### Phase 1 – STM32 firmware (most critical part)
-- HAL layer; defined pin states immediately after reset (motors off, PSU off).
-- `MotorChannel` state machine with `tick()`; ISRs only deliver raw data
-  (pulse counter, current samples) via atomic/volatile hand-over.
-- Position tracking from counted pulses, separate factors for opening/closing,
-  dead zone taken into account, fixed point instead of an integer scaler.
-- Robust endstop/undercurrent detection (consecutive counters, plausibility limits).
-- Calibration data + last position persisted (EEPROM record, version + CRC,
-  wear-friendly). After boot: reference run instead of a full re-learn.
-- Non-blocking 1-Wire scheduler, sensors addressed only by ROM id.
-- IWDG, BOR level, reset cause, error counters.
-- Protocol server.
-- Host tests for the state machine, calibration evaluation, storage.
-- **Hardware test on the owner's board.**
+
+Done:
+- `src/core` (hardware independent, host tested):
+  - `MotorRun`: one movement in interrupt context – current filter,
+    inrush blanking, endstop by current (learned or measured reference,
+    capped by the absolute limit) or by stall, open circuit (consecutive
+    samples), hard overcurrent limit, timeout; stops the driver directly in
+    the interrupt and counts coasting pulses.
+  - `ValveManager`: 12 channels, one motor at a time, PSU and MUX settle
+    times, jobs detect → calibrate → reference → move, position from
+    counted pulses with separate opening/closing strokes, endstop moves
+    re-reference, unexpected endstop → recalibration / `BLOCKED`, fault
+    retry every 6 h, re-detection every 10 min, recalibration after
+    moves/days.
+  - `Storage`: EEPROM records with A/B slots, sequence number and CRC,
+    non-blocking page writes, power-loss safe.
+  - `LinkServer` + `Controller`: all protocol v1 requests, duplicate
+    protection, events, boot handshake, failsafe, lazy persistence.
+  - `SensorManager`: non-blocking 1-Wire measurement (at most ~14 ms bus
+    time per main-loop pass), ROM search, broadcast Convert T, DS18B20 and
+    DS2438 (temperature, VAD, VDD), CRC checks, last value kept on errors.
+- `src/board`: pins (C1/C2), motor driver, 1 kHz sampling (TIM11) and pulse
+  interrupt at equal priority, 24LC64 EEPROM, bit-banged 1-Wire master on
+  PB10, USART1 with 512-byte buffers, IWDG (2 s), reset cause, MCU UID.
+- 57 host tests with a valve simulator (asymmetric strokes, coasting,
+  obstruction, disconnected motor, missing pulses, endless motor) and a
+  bit-level 1-Wire bus simulator, including 150 random moves without drift
+  and end-to-end protocol tests.
+
+Open:
+- DS2482 1-Wire bridge (optional on the board), not supported yet.
+- BOR level (option bytes), UART error counters, MCU temperature.
+- **Hardware test on the owner's board** (flash via the ESP32 once phase 2
+  provides the update path, or via USB DFU / ST-Link).
 
 ### Phase 2 – ESP32 core
-- FreeRTOS tasks with clear responsibilities instead of TaskManagerIO/`yieldTask`.
-- Data model + event bus, protocol client with retry/timeout/resync.
-- Versioned configuration with migration.
-- STM32 update via ROM bootloader (BOOT0/NRST driven by the ESP, as today).
-- REST API + WebSocket, real authentication.
-- PI controller with monotonic time base, proper anti-windup, staleness check.
-- Watchdogs enabled.
+
+Done (2a, bring-up for the first hardware test):
+- `src/core` (host tested): `LinkClient` (handshake, stop-and-wait with
+  retries, polling, events, gap detection, user targets resent after an
+  STM32 restart, hard-reset request when the STM32 stays silent) and
+  `Stm32Flasher` (AN3155: bootloader entry via the legacy-compatible
+  "DEADBEEF" handshake – BOOT0 is not wired on C2/C3 – with BOOT0 as
+  fallback, chip id, sector erase, 256-byte writes with retry, read-back
+  verification).
+- Integration test: `LinkClient` against the real STM32 core with valve,
+  1-Wire and EEPROM simulators over a wire that drops and corrupts bytes.
+- `src/app`: link task (UART, LinkClient, STM32 update from LittleFS),
+  network (Ethernet, WiFi fallback, setup AP; settings read from the
+  legacy NVS without modifying it), web page + REST API (status, targets,
+  calibration, settings, STM32 flashing, ESP32 OTA, start previous ESP32
+  firmware), basic auth with the legacy web login, task watchdog.
+- Hardware test guide: [`../testing/hardware-bringup.md`](../testing/hardware-bringup.md).
+
+Open (2b):
+- Own versioned configuration (JSON on LittleFS) incl. network settings
+  and a settings page; migration from the legacy NVS.
+- PI controller with monotonic time base, proper anti-windup, staleness
+  check; sensor-to-valve assignment.
+- Syslog, time (SNTP).
 
 ### Phase 3 – MQTT / Home Assistant
 - LWT + birth message, `availability_topic`, client id derived from MAC.

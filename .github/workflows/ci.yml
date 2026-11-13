@@ -14,27 +14,31 @@ jobs:
     name: clang-format
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check formatting of v2 code
         run: |
           files=$(git ls-files 'common/*.c' 'common/*.h' 'firmware/*.c' 'firmware/*.h' 'firmware/*.cpp')
           clang-format-18 --dry-run --Werror $files
 
   host-tests:
-    name: Host tests (protocol)
+    name: Host tests (${{ matrix.project }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [common/protocol, firmware/stm32, firmware/esp32]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.platformio
-          key: pio-native-${{ hashFiles('common/protocol/platformio.ini') }}
+          key: pio-native-${{ hashFiles(format('{0}/platformio.ini', matrix.project)) }}
       - run: pip install platformio
       - name: Run tests
-        working-directory: common/protocol
+        working-directory: ${{ matrix.project }}
         run: pio test -e native
 
   build:
@@ -48,23 +52,33 @@ jobs:
             env: f411_c2
           - target: stm32
             env: f401_c2
+          - target: stm32
+            env: f401ce_c2
           - target: esp32
             env: wt32_eth01
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.platformio
           key: pio-${{ matrix.target }}-${{ hashFiles(format('firmware/{0}/platformio.ini', matrix.target)) }}
       - run: pip install platformio
       - name: Build
         working-directory: firmware/${{ matrix.target }}
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DFW_BUILD=${{ github.run_number }}
         run: pio run -e ${{ matrix.env }}
-      - uses: actions/upload-artifact@v4
+      - name: Name the binary
+        run: |
+          mkdir -p out
+          cp firmware/${{ matrix.target }}/.pio/build/${{ matrix.env }}/firmware.bin \
+             out/vdmot-v2-${{ matrix.target }}-${{ matrix.env }}-build${{ github.run_number }}.bin
+      # a single .bin per artifact, not zipped; the file name is the artifact name
+      - uses: actions/upload-artifact@v7
         with:
-          name: firmware-${{ matrix.target }}-${{ matrix.env }}
-          path: firmware/${{ matrix.target }}/.pio/build/${{ matrix.env }}/firmware.bin
+          path: out/vdmot-v2-${{ matrix.target }}-${{ matrix.env }}-build${{ github.run_number }}.bin
+          archive: false
           if-no-files-found: error
