@@ -1,5 +1,6 @@
 /*
- * Status and maintenance page (bring-up UI of firmware v2).
+ * Web page: overview, room setup, settings and maintenance (firmware v2,
+ * phase 2b). The full redesign follows in phase 4.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
@@ -18,41 +19,86 @@ static const char kIndexHtml[] = R"HTML(<!doctype html>
 *{box-sizing:border-box}body{margin:0;font:14px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
 header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:12px;align-items:center}
 h1{font-size:18px;margin:0 12px 0 0}h2{font-size:15px;margin:0 0 8px}
-main{padding:16px;display:grid;gap:16px;max-width:1200px;margin:0 auto}
+nav{display:flex;gap:4px;padding:8px 16px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+nav a{padding:6px 12px;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;color:var(--mut);text-decoration:none}
+nav a.on{background:var(--card);border-color:var(--line);color:var(--fg);margin-bottom:-1px}
+main{padding:16px;max-width:1300px;margin:0 auto}.tab{display:none;gap:16px}.tab.on{display:grid}
 section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto}
 table{border-collapse:collapse;width:100%}td,th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
 th{color:var(--mut);font-weight:500}.num{text-align:right;font-variant-numeric:tabular-nums}
 .pill{padding:2px 8px;border-radius:10px;border:1px solid var(--line)}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
 input[type=number]{width:70px}input,button,select{font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--fg)}
-button{cursor:pointer}button.p{background:var(--acc);color:#fff;border-color:var(--acc)}
+input.w{width:180px}input.s{width:110px}select[multiple]{vertical-align:middle}
+button{cursor:pointer}button.p{background:var(--acc);color:#fff;border-color:var(--acc)}button:disabled,input:disabled{opacity:.45;cursor:default}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}.mut{color:var(--mut)}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:4px 16px}
-label{display:flex;justify-content:space-between;gap:8px}progress{width:200px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 16px}
+label{display:flex;justify-content:space-between;align-items:center;gap:8px}progress{width:200px}
 .chg input{border-color:var(--warn)}small.def{color:var(--warn);font-size:12px}
-#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:6px;display:none;max-width:90vw}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:6px;display:none;max-width:90vw;z-index:9}
 </style></head><body>
 <div id="toast"></div>
-<header><h1>VdMot Controller</h1>
+<header><h1 id="title">VdMot Controller</h1>
 <span id="link" class="pill">…</span><span id="ver" class="mut"></span><span id="net" class="mut"></span>
 <span id="err" class="bad"></span></header>
+<nav id="nav"><a href="#ov">Overview</a><a href="#rooms">Rooms &amp; valves</a><a href="#set">Settings</a><a href="#sys">System</a></nav>
 <main>
+<div class="tab" id="tab-ov">
+<section><h2>Zones</h2><table><thead><tr><th>Zone</th><th class="num">Temperature °C</th><th>Setpoint °C</th><th>Heating</th><th>Mode</th>
+<th class="num">Output %</th><th>State</th></tr></thead><tbody id="zones"></tbody></table>
+<div class="row mut" id="nozones">No zones yet – create them under “Rooms &amp; valves”.</div>
+<div class="row" id="flow"></div></section>
 <section><h2>Valves</h2>
 <div class="row"><button onclick="act('calibrate','all')">Calibrate all</button>
 <button onclick="act('detect','all')">Detect all</button><button onclick="act('stop','all')">Stop all</button></div>
-<table><thead><tr><th>#</th><th>State</th><th class="num">Actual %</th><th class="num">Target %</th>
+<table><thead><tr><th>#</th><th>Name</th><th>Zone</th><th>State</th><th class="num">Actual %</th><th class="num">Target %</th>
+<th class="num" title="requested by controller or command → sent after limits and flow guard">Requested → effective %</th>
 <th>Set</th><th class="num">mA</th><th>Flags</th><th class="num">Strokes open/close</th><th class="num">Moves</th><th></th></tr></thead>
 <tbody id="valves"></tbody></table></section>
-<section><h2>Sensors</h2><div class="row"><button onclick="act('scan')">Search bus</button><span id="scan" class="mut"></span></div>
-<table><thead><tr><th>ROM id</th><th>Type</th><th class="num">Value</th><th>Status</th><th class="num">Age s</th></tr></thead>
-<tbody id="sensors"></tbody></table></section>
+</div>
+
+<div class="tab" id="tab-rooms">
+<section><h2>Zones</h2>
+<p class="mut">A zone is a room or heating circuit with one controller. Valves are assigned below. Mode <i>control</i>: the ESP32 controls the valves from the temperature; <i>manual</i>: the valve positions are set from outside (web, Home Assistant).
+Profiles: floor (Xp 2 K, Ti 3600 s, sample 300 s), radiator (Xp 1.5 K, Ti 900 s, sample 60 s), custom. Fallback: position while the temperature is missing (empty = global).</p>
+<table><thead><tr><th>Name</th><th>Mode</th><th>Setpoint</th><th>Heating</th><th>Control temperature</th><th>Further temperatures</th><th>Profile</th>
+<th>Xp K</th><th>Ti s</th><th>Sample s</th><th>Fallback %</th><th></th></tr></thead><tbody id="ezones"></tbody></table>
+<div class="row"><button onclick="addZone()">Add zone</button><button class="p" onclick="saveZones()">Save zones</button></div></section>
+<section><h2>Valves</h2>
+<p class="mut">Without a zone a valve is set directly. Min/max limit every target (min = minimum opening, also with heating off). The factor scales the zone output (hydraulic balancing). Flow priority: preferred valves for the minimum total opening.</p>
+<table><thead><tr><th>#</th><th>Name</th><th>Zone</th><th>Min %</th><th>Max %</th><th>Factor %</th><th>Flow priority</th></tr></thead><tbody id="evalves"></tbody></table>
+<div class="row"><button class="p" onclick="saveValves()">Save valves</button></div></section>
+<section><h2>Temperature sources</h2>
+<p class="mut">Max age: after this time without a new value the source counts as stale and the zone goes to its fallback position (0 = never). MQTT sources need a publisher that sends regularly; MQTT itself follows with the Home Assistant integration.</p>
+<table><thead><tr><th>Name</th><th>Type</th><th>ROM id / MQTT topic</th><th>JSON field</th><th>Offset K</th><th>Max age s</th><th class="num">Value °C</th><th>State</th><th></th></tr></thead><tbody id="esources"></tbody></table>
+<div class="row"><button onclick="addSource('mqtt')">Add MQTT source</button><button class="p" onclick="saveSources()">Save sources</button></div>
+<div class="row mut" id="unused"></div></section>
+</div>
+
+<div class="tab" id="tab-set">
+<section><h2>Flow guard and fallback</h2><div class="grid" id="f-flow"></div>
+<p class="mut">The fallback position is used while a zone has no valid temperature and is also written to the STM32 as its failsafe position (ESP32 gone). The minimum total opening is the minimum sum of all valve positions in percentage points (150 = one and a half open valves, 0 = off); it is reached by opening flow priority valves first.</p>
+<div class="row"><button class="p" onclick="saveForm('flow')">Save</button></div></section>
+<section><h2>Device</h2><div class="grid" id="f-device"></div>
+<div class="row"><button class="p" onclick="saveForm('device')">Save</button><span class="mut">The name is also the host name. Leave a password empty to keep it.</span></div></section>
+<section><h2>Network</h2><div class="grid" id="f-network"></div>
+<div class="row"><button class="p" onclick="saveForm('network')">Save</button><span class="mut">Takes effect after a restart. If no network comes up, the ESP32 opens the access point VdMot-XXXX (password vdmot-setup).</span></div></section>
+<section><h2>MQTT</h2><div class="grid" id="f-mqtt"></div>
+<div class="row"><button class="p" onclick="saveForm('mqtt')">Save</button><span class="mut">Stored already; the MQTT / Home Assistant integration follows in the next firmware step.</span></div></section>
 <section><h2>STM32 settings</h2>
 <form id="sys" onsubmit="save('system',this);return false"><div class="grid" id="sysf"></div>
 <div class="row"><button class="p">Save system settings</button><button type="button" onclick="defaults('sysf','sys')">Load defaults</button>
-<span class="mut">Orange: differs from the default. Settings are stored on the STM32 and survive updates.</span></div></form>
+<span class="mut">Orange: differs from the default. Settings are stored on the STM32 and survive updates. The failsafe position follows the fallback position.</span></div></form>
 <form id="mot" onsubmit="save('motor',this);return false"><div class="grid" id="motf"></div>
 <div class="row"><button class="p">Save motor parameters</button><button type="button" onclick="defaults('motf','motor')">Load defaults</button></div></form>
 <form onsubmit="save('channels',this);return false"><div class="row">Enabled channels <span id="chans"></span>
 <button class="p">Save</button></div></form></section>
+<section><h2>Configuration backup</h2>
+<div class="row"><a href="/api/config/export"><button>Export configuration</button></a>
+<input type="file" id="fimp" accept=".json"><button onclick="importCfg()">Import and restart</button></div>
+<div class="row mut">The export contains the passwords. <span id="cfginfo"></span></div></section>
+</div>
+
+<div class="tab" id="tab-sys">
 <section><h2>Firmware</h2>
 <div class="row">STM32 image (.bin) <input type="file" id="fstm" accept=".bin"><button onclick="upload('stm32')">Flash STM32</button></div>
 <div class="row">ESP32 image (.bin) <input type="file" id="fesp" accept=".bin"><button onclick="upload('esp')">Update ESP32</button></div>
@@ -61,11 +107,15 @@ label{display:flex;justify-content:space-between;gap:8px}progress{width:200px}
 <div class="row"><button onclick="act('stm32/reset')">Restart STM32</button><button onclick="act('stm32/hardreset')">Hard reset STM32</button>
 <button onclick="if(confirm('Restart the ESP32?'))act('reboot')">Restart ESP32</button></div>
 <div class="row"><span id="prev" class="mut"></span><button id="rb" onclick="if(confirm('Start the previous ESP32 firmware (e.g. the legacy 1.x)?'))act('esp/rollback')">Start previous ESP32 firmware</button></div></section>
+<section><h2>1-Wire bus</h2><div class="row"><button onclick="act('scan')">Search bus</button><span id="scan" class="mut"></span></div>
+<table><thead><tr><th>ROM id</th><th>Type</th><th class="num">Value</th><th>Status</th><th class="num">Age s</th><th>Source</th></tr></thead>
+<tbody id="sensors"></tbody></table></section>
 <section><h2>Diagnostics</h2><div class="grid" id="diag"></div>
 <div class="row">Failsafe test: pause the link for <input type=number id=pause min=0 max=3600 value=360> s
 <button onclick="pauseLink()">Pause link</button><button onclick="pauseLink(0)">Resume</button>
 <span class="mut">The STM32 enters the failsafe after its link timeout (default 300 s; can be lowered in the STM32 settings).</span></div></section>
 <section><h2>Log</h2><table><tbody id="log"></tbody></table></section>
+</div>
 </main>
 <script>
 const MODES=['disabled','unknown','not connected','idle','opening','closing','calibrating','queued','fault'];
@@ -73,33 +123,43 @@ const FAULTS=['','open circuit','blocked','timeout','overcurrent','calibration f
 const KINDS=['','DS18B20 °C','DS2438 VAD V','DS2438 VDD V','DS2438 °C'];
 const SSTAT=['ok','CRC error','unreachable','not measured','out of range'];
 const RESETS=['unknown','power-on','reset pin','software','watchdog','brown-out','low-power'];
+const ACTIONS={off:'heating off',idle:'idle',heating:'heating',manual:'manual',fallback:'fallback (no temperature)',hold:'waiting for values'};
 function dur(s){if(s===undefined)return '?';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'d ':'')+(d||h?h+'h ':'')+m+'min'}
-const SYSF=[['link_timeout_s','Link timeout s (0 = off)'],['failsafe_pos','Failsafe position ‰ (65535 = hold)'],
+const SYSF=[['link_timeout_s','Link timeout s (0 = off)'],['failsafe_pos','Failsafe position ‰ (= fallback)'],
 ['startup_pos','Startup position ‰ (65535 = last)'],['sensor_interval_s','Sensor interval s'],
 ['recal_after_moves','Recalibrate after moves'],['recal_after_days','Recalibrate after days']];
 const MOTF=[['endstop_factor_open','Endstop factor open (x/10)'],['endstop_factor_close','Endstop factor close (x/10)'],
 ['endstop_abs_ma','Endstop absolute mA'],['inrush_blank_ms','Inrush blanking ms'],['opencircuit_ma10','Open circuit 0.1 mA'],
 ['opencircuit_ms','Open circuit ms'],['move_timeout_s','Move timeout s'],['min_stroke_counts','Min. stroke pulses'],['max_calib_retries','Calibration retries']];
-let formsDone=false,editing=new Set();
+const FORMS={flow:[['fallback_pct','Fallback position %','num'],['min_total_pct','Minimum total opening % points (0 = off)','num']],
+device:[['name','Name','text'],['web_user','Web user (empty = no login)','text'],['web_pwd','Web password','pwd'],['tz','Time zone (POSIX)','text'],['ntp','NTP server','text']],
+network:[['mode','Interface','sel:auto|ethernet|wifi'],['dhcp','DHCP','bool'],['ip','IP address','text'],['mask','Subnet mask','text'],['gateway','Gateway','text'],['dns','DNS server','text'],['ssid','WiFi SSID','text'],['wifi_pwd','WiFi password','pwd']],
+mqtt:[['enabled','Enabled','bool'],['host','Broker host','text'],['port','Port','num'],['user','User','text'],['password','Password','pwd'],['client_id','Client id (empty = from MAC)','text'],['base_topic','Base topic (empty = vdmot/<client id>)','text'],['discovery','Home Assistant discovery','bool'],['discovery_prefix','Discovery prefix','text']]};
+let formsDone=false,editing=new Set(),CFG=null,lastState=null;
 const $=id=>document.getElementById(id);
-const pct=v=>v===65535?'?':(v/10).toFixed(1);
-function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+const pct=v=>v===65535||v===undefined?'?':(v/10).toFixed(1);
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 let toastT=0;function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',4000)}
+/* tabs */
+function tab(){const h=(location.hash||'#ov').slice(1);document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.id==='tab-'+h));
+document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+h))}
+window.addEventListener('hashchange',tab);tab();
 const DONE={'stm32/reset':'Restart sent – the STM32 restarts (see boot # and log)','stm32/hardreset':'Reset pulse sent – only reaches the STM32 with jumper X20',
-calibrate:'Calibration scheduled',detect:'Detection scheduled',stop:'Stop sent',scan:'Bus search started',target:'Target sent',
+calibrate:'Calibration scheduled',detect:'Detection scheduled',stop:'Stop sent',scan:'Bus search started',target:'Target sent',zone:'Zone changed',
 'config/system':'System settings saved','config/motor':'Motor parameters saved','config/channels':'Channels saved',reboot:'ESP32 restarts…','link/pause':'Link pause changed','esp/rollback':'Starting the previous firmware…'};
+async function req(path,opt){let j;const c=new AbortController();const t=setTimeout(()=>c.abort(),8000);
+try{const r=await fetch('/api/'+path,Object.assign({method:'POST',signal:c.signal},opt));j=await r.json().catch(()=>({ok:false,error:'HTTP '+r.status}))}
+catch(e){j={ok:false,error:c.signal.aborted?'no answer from the ESP32':'ESP32 not reachable'}}finally{clearTimeout(t)}return j}
 /* actions are sent url-encoded (the ESP32 web server does not handle empty multipart bodies) */
-async function post(path,body){let j;const c=new AbortController();const t=setTimeout(()=>c.abort(),8000);
-try{const r=await fetch('/api/'+path,{method:'POST',body:new URLSearchParams(body||undefined),signal:c.signal});j=await r.json().catch(()=>({ok:false,error:'HTTP '+r.status}))}
-catch(e){j={ok:false,error:c.signal.aborted?'no answer from the ESP32':'ESP32 not reachable'}}finally{clearTimeout(t)}
+async function post(path,body){const j=await req(path,{body:new URLSearchParams(body||undefined)});
 if(!j.ok)alert(j.error||'failed');else toast(DONE[path]||'Done');refresh();return j}
 function act(a,ch){const f=new FormData();if(ch!==undefined)f.append('ch',ch);post(a,f)}
-let lastState=null;
 function defaults(id,kind){const d=lastState&&lastState.defaults&&lastState.defaults[kind];if(!d)return;
 Object.entries(d).forEach(([k,v])=>{const i=$(id).querySelector(`[name=${k}]`);if(i)i.value=v});dirty.add(id);toast('Defaults loaded – click Save to apply')}
 let espUpload=false;
 function pauseLink(sec){const f=new FormData();f.append('seconds',sec===undefined?$('pause').value:sec);post('link/pause',f)}
-function setT(ch){const v=$('t'+ch).value;const f=new FormData();f.append('ch',ch);f.append('pos',v);editing.delete(ch);post('target',f)}
+function setT(ch){const v=$('t'+ch).value;const f=new FormData();f.append('ch',ch);f.append('pos',v);editing.delete('t'+ch);post('target',f)}
+function zoneCmd(id,k,v){const f=new FormData();f.append('id',id);f.append(k,v);editing.delete('sp'+id);post('zone',f)}
 /* forms with unsaved edits are not overwritten by the periodic refresh */
 const dirty=new Set();const FORMID={system:'sysf',motor:'motf',channels:'chans'};
 ['input','change'].forEach(ev=>document.addEventListener(ev,e=>{const f=e.target.closest&&e.target.closest('#sysf,#motf,#chans');if(f)dirty.add(f.id)}));
@@ -114,23 +174,114 @@ function fill(id,fields,vals,defs){const g=$(id);if(!formsDone)g.innerHTML=field
 if(!vals)return;fields.forEach(([k])=>{const lab=g.querySelector(`[data-k=${k}]`);const diff=defs&&vals[k]!==defs[k];
 lab.classList.toggle('chg',!!diff);lab.querySelector('small').textContent=diff?`(default ${defs[k]})`:''});
 if(!dirty.has(id))fields.forEach(([k])=>{g.querySelector(`[name=${k}]`).value=vals[k]})}
-async function refresh(){let s;try{s=await (await fetch('/api/state')).json()}catch(e){$('link').textContent='ESP32 not reachable';return}
+
+/* ---------------- configuration editors ---------------- */
+const opt=(v,l,sel)=>`<option value="${esc(v)}"${sel?' selected':''}>${esc(l)}</option>`;
+async function loadCfg(){const r=await fetch('/api/config').catch(()=>null);if(!r||!r.ok)return;CFG=await r.json();
+ED.zones=CFG.zones.map(z=>Object.assign({},z));ED.sources=CFG.sources.map(s=>Object.assign({},s));
+renderZones();renderValves();renderSources();Object.keys(FORMS).forEach(renderForm);$('title').textContent=CFG.device.name}
+async function saveSection(sec,data,msg){const j=await req('config?section='+sec,{headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+if(!j.ok){alert(j.error||'failed');return false}toast(msg);await loadCfg();refresh();
+if(j.restart&&confirm('Restart the ESP32 now to apply the change?'))post('reboot');return true}
+const ED={zones:[],sources:[]};
+function srcName(id){const s=CFG.sources.find(x=>x.id===id);return s?s.name:id}
+function srcOptions(sel,none){return (none?opt('','– none –',!sel):'')+ED.sources.filter(s=>s.id).map(s=>opt(s.id,s.name,s.id===sel)).join('')}
+const PROF={floor:{xp:2,ti_s:3600,sample_s:300},radiator:{xp:1.5,ti_s:900,sample_s:60}};
+function renderZones(){$('ezones').innerHTML=ED.zones.map((z,i)=>{const c=z.profile==='custom'?'':' disabled';const q=PROF[z.profile]||z;return `<tr data-i=${i}>
+<td><input class=s data-k=name value="${esc(z.name)}"></td>
+<td><select data-k=mode>${opt('control','control',z.mode==='control')}${opt('manual','manual',z.mode==='manual')}</select></td>
+<td><input type=number data-k=setpoint min=5 max=30 step=0.5 value=${z.setpoint}></td>
+<td><input type=checkbox data-k=heating${z.heating?' checked':''}></td>
+<td><select data-k=control_source>${srcOptions(z.control_source,true)}</select></td>
+<td><select multiple size=2 data-k=info_sources>${ED.sources.filter(s=>s.id).map(s=>opt(s.id,s.name,(z.info_sources||[]).includes(s.id))).join('')}</select></td>
+<td><select data-k=profile onchange="collectZones();renderZones()">${['floor','radiator','custom'].map(p=>opt(p,p,z.profile===p)).join('')}</select></td>
+<td><input type=number data-k=xp min=0.2 max=20 step=0.1 value=${q.xp}${c}></td><td><input type=number data-k=ti_s min=0 value=${q.ti_s}${c}></td>
+<td><input type=number data-k=sample_s min=10 value=${q.sample_s}${c}></td>
+<td><input type=number data-k=fallback_pct min=0 max=100 value="${z.fallback_pct<0?'':z.fallback_pct}" placeholder=global></td>
+<td><button onclick="collectZones();ED.zones.splice(${i},1);renderZones()">Delete</button></td></tr>`}).join('')||'<tr><td colspan=12 class=mut>No zones</td></tr>'}
+function rowVals(tr){const o={};tr.querySelectorAll('[data-k]').forEach(e=>{const k=e.dataset.k;
+if(e.type==='checkbox')o[k]=e.checked;else if(e.multiple)o[k]=[...e.selectedOptions].map(x=>x.value);
+else if(e.type==='number')o[k]=e.value===''?null:Number(e.value);else o[k]=e.value});return o}
+function collectZones(){document.querySelectorAll('#ezones tr[data-i]').forEach(tr=>{const z=ED.zones[tr.dataset.i];Object.assign(z,rowVals(tr));if(z.fallback_pct===null)z.fallback_pct=-1})}
+function addZone(){collectZones();ED.zones.push({name:'Zone '+(ED.zones.length+1),mode:'control',setpoint:20,heating:true,control_source:'',info_sources:[],profile:'radiator',xp:1.5,ti_s:900,sample_s:60,fallback_pct:-1});renderZones()}
+function saveZones(){collectZones();saveSection('zones',ED.zones,'Zones saved')}
+function renderValves(){$('evalves').innerHTML=CFG.valves.map((v,i)=>`<tr data-i=${i}><td>${i+1}</td>
+<td><input class=s data-k=name value="${esc(v.name)}"></td>
+<td><select data-k=zone>${opt('','– none –',!v.zone)}${CFG.zones.map(z=>opt(z.id,z.name,z.id===v.zone)).join('')}</select></td>
+<td><input type=number data-k=min_pct min=0 max=100 value=${v.min_pct}></td><td><input type=number data-k=max_pct min=0 max=100 value=${v.max_pct}></td>
+<td><input type=number data-k=factor_pct min=10 max=250 value=${v.factor_pct}></td><td><input type=checkbox data-k=flow_priority${v.flow_priority?' checked':''}></td></tr>`).join('')}
+function saveValves(){const a=[...document.querySelectorAll('#evalves tr[data-i]')].map(rowVals);saveSection('valves',a,'Valves saved')}
+function renderSources(){$('esources').innerHTML=ED.sources.map((s,i)=>{const m=s.type==='mqtt';return `<tr data-i=${i}>
+<td><input class=s data-k=name value="${esc(s.name)}"></td><td>${m?'MQTT':'1-Wire'}</td>
+<td>${m?`<input class=w data-k=topic value="${esc(s.topic)}">`:esc(s.rom)}</td>
+<td>${m?`<input class=s data-k=field value="${esc(s.field)}" placeholder="plain number">`:''}</td>
+<td><input type=number data-k=offset min=-10 max=10 step=0.1 value=${s.offset}></td>
+<td><input type=number data-k=max_age_s min=0 value=${s.max_age_s}></td>
+<td class=num id="sv_${esc(s.id)}"></td><td id="ss_${esc(s.id)}" class=mut>${s.id?'':'not saved'}</td>
+<td><button onclick="collectSources();ED.sources.splice(${i},1);renderSources()">Delete</button></td></tr>`}).join('')||'<tr><td colspan=9 class=mut>No sources</td></tr>';renderUnused()}
+function collectSources(){document.querySelectorAll('#esources tr[data-i]').forEach(tr=>Object.assign(ED.sources[tr.dataset.i],rowVals(tr)))}
+function addSource(type,rom){collectSources();ED.sources.push(type==='mqtt'?{name:'MQTT '+(ED.sources.length+1),type,topic:'',field:'',offset:0,max_age_s:3600}
+:{name:'Sensor '+rom.slice(-5),type,rom,offset:0,max_age_s:300});renderSources()}
+function saveSources(){collectSources();saveSection('sources',ED.sources.map(s=>{const o=Object.assign({},s);if(!o.id)delete o.id;return o}),'Sources saved')}
+const isTemp=k=>k===1||k===4;
+function renderUnused(){if(!lastState||!CFG)return;const used=new Set(ED.sources.filter(s=>s.type==='onewire').map(s=>s.rom));
+const un=lastState.sensors.filter(x=>isTemp(x.kind)&&!used.has(x.rom));
+$('unused').innerHTML=un.length?'1-Wire sensors not used yet: '+un.map(x=>`<button onclick="addSource('onewire','${x.rom}')">${x.rom} (${(x.value/1000).toFixed(1)} °C) – add</button>`).join(' '):''}
+function renderForm(sec){const v=CFG[sec];$('f-'+sec).innerHTML=FORMS[sec].map(([k,l,t])=>{let i;
+if(t==='bool')i=`<input type=checkbox data-k=${k}${v[k]?' checked':''}>`;
+else if(t==='pwd')i=`<input type=password class=s data-k=${k} placeholder="${v[k+'_set']?'unchanged':'not set'}" autocomplete=new-password>`;
+else if(t.startsWith('sel:'))i=`<select data-k=${k}>${t.slice(4).split('|').map(o=>opt(o,o,v[k]===o)).join('')}</select>`;
+else if(t==='num')i=`<input type=number data-k=${k} value="${esc(v[k])}">`;else i=`<input class=s data-k=${k} value="${esc(v[k])}">`;
+return `<label><span>${esc(l)}</span>${i}</label>`}).join('')}
+function saveForm(sec){const o=rowVals($('f-'+sec));FORMS[sec].forEach(([k,,t])=>{if(t==='pwd'&&!o[k])delete o[k]});
+saveSection(sec,o,'Settings saved')}
+async function importCfg(){const fi=$('fimp').files[0];if(!fi){alert('choose a file');return}if(!confirm('Replace the whole configuration and restart?'))return;
+const j=await req('config/import',{headers:{'Content-Type':'application/json'},body:await fi.text()});if(!j.ok)alert(j.error||'failed');else toast('Imported – the ESP32 restarts…')}
+
+/* ---------------- periodic refresh ---------------- */
+function renderZoneStatus(s){const zs=s.ctl.zones;$('nozones').style.display=zs.length?'none':'';
+const key=zs.map(z=>z.id).join();if($('zones').dataset.key!==key){$('zones').dataset.key=key;
+$('zones').innerHTML=zs.map(z=>`<tr id="zr${z.id}"><td></td><td class=num></td>
+<td><input id="sp${z.id}" type=number min=5 max=30 step=0.5 oninput="editing.add('sp${z.id}')"><button onclick="zoneCmd('${z.id}','setpoint',$('sp${z.id}').value)">Set</button></td>
+<td><input type=checkbox id="ht${z.id}" onchange="zoneCmd('${z.id}','heating',this.checked?1:0)"></td>
+<td><select id="md${z.id}" onchange="zoneCmd('${z.id}','mode',this.value)">${opt('control','control')}${opt('manual','manual')}</select></td>
+<td class=num></td><td></td></tr>`).join('')}
+zs.forEach(z=>{const c=$('zr'+z.id).cells;c[0].textContent=z.name;
+c[1].textContent=z.temperature===undefined?'–':z.temperature.toFixed(1);c[1].className='num '+(z.source==='ok'?'':'warn');c[1].title='source: '+z.source;
+const sp=$('sp'+z.id);if(!editing.has('sp'+z.id)&&document.activeElement!==sp)sp.value=z.setpoint;
+$('ht'+z.id).checked=z.heating;if(document.activeElement!==$('md'+z.id))$('md'+z.id).value=z.mode;
+sp.disabled=z.mode!=='control';c[5].textContent=z.output===undefined?'–':z.output.toFixed(1);
+c[6].textContent=ACTIONS[z.action]||z.action;c[6].className=z.action==='fallback'?'warn':(z.action==='heating'?'ok':'mut')});
+const f=s.ctl.flow;$('flow').innerHTML=f.min_total?`Flow guard: total ${pct(f.total)} % of at least ${pct(f.min_total)} %`+
+(f.active?` – <b class=warn>active, +${pct(f.added)} % added</b>`:' – not needed')+(f.insufficient?' – <b class=bad>minimum cannot be reached</b>':''):'<span class=mut>Flow guard off (minimum total opening 0)</span>'}
+async function refresh(){let s;try{s=await (await fetch('/api/state')).json()}catch(e){$('link').textContent='ESP32 not reachable';$('link').className='pill bad';return}
 const l=s.link;$('link').textContent='STM32 '+l.state+(l.paused_s?` (link paused, ${l.paused_s} s)`:'');$('link').className='pill '+(l.state==='connected'?'ok':'bad');
 $('ver').textContent='ESP32 '+s.esp.version+(s.stm?(' · STM32 '+s.stm.version+' ('+s.stm.mcu+', '+s.stm.hw+') · boot #'+s.stm.boot_count+', last reset: '+(RESETS[s.stm.reset_cause]||s.stm.reset_cause)+', up '+dur(s.diag&&s.diag.stm_uptime_s)):'');
-$('net').textContent=s.net.interface+' '+s.net.ip+(s.net.ap?(' · AP '+s.net.ap_ssid):'');$('err').textContent=s.error||'';
+$('net').textContent=s.net.interface+' '+s.net.ip+(s.net.ap?(' · AP '+s.net.ap_ssid):'')+(s.net.time?' · '+s.net.time:'');$('err').textContent=s.error||'';
+$('cfginfo').textContent='Configuration at start: '+s.config;
+renderZoneStatus(s);
+const zname=id=>{const z=s.ctl.zones.find(x=>x.id===id);return z?z.name:''};
 /* the valve table is built once; afterwards only the cells are updated, so
  * an input that has the focus is not replaced */
-if($('valves').rows.length!==s.valves.length)$('valves').innerHTML=s.valves.map(v=>`<tr id=vr${v.ch}><td>${v.ch+1}</td><td></td><td class=num></td><td class=num></td>
-<td><input id=t${v.ch} type=number min=0 max=100 step=0.5 oninput="editing.add(${v.ch})"><button onclick="setT(${v.ch})">Set</button></td>
+if($('valves').rows.length!==s.valves.length)$('valves').innerHTML=s.valves.map(v=>`<tr id=vr${v.ch}><td>${v.ch+1}</td><td></td><td></td><td></td><td class=num></td><td class=num></td><td class=num></td>
+<td><input id=t${v.ch} type=number min=0 max=100 step=0.5 oninput="editing.add('t${v.ch}')"><button id=b${v.ch} onclick="setT(${v.ch})">Set</button></td>
 <td class=num></td><td></td><td class=num></td><td class=num></td><td><button onclick="act('calibrate',${v.ch})">Calibrate</button></td></tr>`).join('');
-s.valves.forEach(v=>{const c=$('vr'+v.ch).cells;c[1].className=v.mode===8?'bad':(v.mode===2||v.mode===0?'mut':'');
-c[1].textContent=(MODES[v.mode]||v.mode)+(v.fault?' – '+FAULTS[v.fault]:'');c[2].textContent=pct(v.actual);c[3].textContent=pct(v.target);
-const i=$('t'+v.ch);if(!editing.has(v.ch)&&document.activeElement!==i)i.value=v.target/10;
-c[5].textContent=(v.current/10).toFixed(1);c[6].textContent=flags(v.flags);c[7].textContent=(v.open_counts??'')+'/'+(v.close_counts??'');c[8].textContent=v.moves??''});
+s.valves.forEach(v=>{const c=$('vr'+v.ch).cells;const cv=s.ctl.valves[v.ch];c[1].textContent=cv.name;c[2].textContent=zname(cv.zone);
+c[3].className=v.mode===8?'bad':(v.mode===2||v.mode===0?'mut':'');
+c[3].textContent=(MODES[v.mode]||v.mode)+(v.fault?' – '+FAULTS[v.fault]:'');c[4].textContent=pct(v.actual);c[5].textContent=pct(v.target);
+c[6].textContent=cv.effective===undefined?'–':(cv.requested!==cv.effective?pct(cv.requested)+' → ':'')+pct(cv.effective);
+const i=$('t'+v.ch);if(!editing.has('t'+v.ch)&&document.activeElement!==i)i.value=(cv.effective??v.target)/10;
+i.disabled=$('b'+v.ch).disabled=cv.controlled;i.title=cv.controlled?'set by the zone controller':'';
+c[8].textContent=(v.current/10).toFixed(1);c[9].textContent=flags(v.flags);c[10].textContent=(v.open_counts??'')+'/'+(v.close_counts??'');c[11].textContent=v.moves??''});
+const srcByRom={};if(CFG)CFG.sources.forEach(x=>{if(x.type==='onewire')srcByRom[x.rom]=x.name});
 $('sensors').innerHTML=s.sensors.map(x=>{const t=x.kind===2||x.kind===3;return `<tr><td>${x.rom}</td><td>${KINDS[x.kind]||x.kind}</td>
-<td class=num>${x.age===65535?'':(x.value/1000).toFixed(t?3:2)}</td><td class="${x.status?'warn':''}">${SSTAT[x.status]||x.status}</td><td class=num>${x.age===65535?'':x.age}</td></tr>`}).join('');
+<td class=num>${x.age===65535?'':(x.value/1000).toFixed(t?3:2)}</td><td class="${x.status?'warn':''}">${SSTAT[x.status]||x.status}</td><td class=num>${x.age===65535?'':x.age}</td>
+<td>${isTemp(x.kind)?esc(srcByRom[x.rom]||''):''}</td></tr>`}).join('');
 $('scan').textContent=s.scan?`${s.scan.total} devices, bus ${s.scan.bus_ok?'ok':'error'}`:'';
-lastState=s;const D=s.defaults||{};fill('sysf',SYSF,s.sys,D.sys);fill('motf',MOTF,s.motor,D.motor);
+s.ctl.sources.forEach(x=>{const v=$('sv_'+x.id),st=$('ss_'+x.id);if(v)v.textContent=x.value===undefined?'–':x.value.toFixed(2);
+if(st){st.textContent=x.state+(x.age!==undefined?` (${x.age} s)`:'');st.className=x.state==='ok'?'ok':'warn'}});
+lastState=s;renderUnused();const D=s.defaults||{};fill('sysf',SYSF,s.sys,D.sys);fill('motf',MOTF,s.motor,D.motor);
+const fs=$('sysf').querySelector('[name=failsafe_pos]');if(fs)fs.readOnly=true;
 if(!formsDone){$('chans').innerHTML=s.valves.map(v=>`<label style="display:inline-flex;gap:2px"><input type=checkbox name=ch value=${v.ch}>${v.ch+1}</label>`).join(' ');}
 if(!dirty.has('chans'))s.valves.forEach(v=>{$('chans').querySelector(`[value="${v.ch}"]`).checked=v.mode!==0});
 formsDone=true;
@@ -138,9 +289,9 @@ const p=s.esp.previous;$('prev').textContent=p?`Previous ESP32 firmware in the o
 const u=s.update;if(!espUpload&&(u.active||u.result)){$('prog').value=u.percent;$('upd').textContent=u.active?`STM32 update: ${u.phase} ${u.percent}%`:`Last STM32 update: ${u.result||u.phase}`;
 const ask=u.active&&u.phase.indexOf('RESET')>=0;$('upd').className=ask?'warn':'mut';$('upd').style.fontWeight=ask?'700':'';
 if(ask)$('upd').textContent='Press the RESET button on the STM32 (BlackPill) now – waiting up to 30 s';$('updd').textContent=u.detail?('Bootloader entry: '+u.detail):''}
-const d=Object.assign({},s.link.stats,s.diag||{});$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
-$('log').innerHTML=s.log.slice().reverse().map(e=>`<tr><td class=mut>${(e.ms/1000).toFixed(0)} s</td><td>${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
-refresh();setInterval(refresh,2000);
+const d=Object.assign({},s.link.stats,s.diag||{});d.esp_heap=s.esp.heap;$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
+$('log').innerHTML=s.log.slice().sort((a,b)=>b.ms-a.ms).map(e=>`<tr><td class=mut>${(e.ms/1000).toFixed(0)} s</td><td>${e.src==='esp'?'ESP32':'STM32'}</td><td>${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
+loadCfg().then(refresh);setInterval(refresh,2000);
 </script></body></html>)HTML";
 
 } // namespace app

@@ -1,6 +1,6 @@
 # ESP32: configuration, room control and Home Assistant integration
 
-Status: **draft for review** · Phases 2b and 3 of [`../refactoring/PLAN.md`](../refactoring/PLAN.md)
+Status: **accepted**, phase 2b implemented, phase 3 open · Phases 2b and 3 of [`../refactoring/PLAN.md`](../refactoring/PLAN.md)
 
 This document defines what the ESP32 firmware v2 stores, how rooms are
 controlled, how a minimum flow through the heating circuits is guaranteed
@@ -61,7 +61,7 @@ temperature sources ──► zone (room) ──► valves (1..n channels) ─�
 | `device` | name (also the MQTT/HA device name), web user and password, time zone, NTP server |
 | `network` | mode (auto / Ethernet / WiFi), DHCP or static (IP, mask, gateway, DNS), WiFi SSID and password |
 | `mqtt` | enabled, broker host and port, user and password, client id (default from the MAC), base topic, HA discovery on/off, discovery prefix (`homeassistant`) |
-| `syslog` | enabled, host, port, level (diagnostics) |
+| `syslog` | enabled, host, port, level (diagnostics) – later |
 | `flow` | fallback position, minimum total opening, see 5 |
 | `sources[]` | temperature sources, see 3 |
 | `zones[]` | zones, see 4 |
@@ -81,7 +81,7 @@ Each source has:
 
 | Field | Meaning |
 |---|---|
-| `id` | stable key (`s1`, `s2`, …), never reused |
+| `id` | stable key (`s1`, `s2`, …), assigned by the ESP32, never reused |
 | `name` | display name, e.g. "Bathroom", "Supply", "Bathroom return" |
 | `type` | `onewire` (ROM id), `mqtt` (topic, optional JSON field), later `knx` (group address) |
 | `offset` | correction in K |
@@ -139,7 +139,7 @@ In `manual` mode every valve takes its own target position from outside.
 | Field | Default | Meaning |
 |---|---|---|
 | `name` | "Channel n" | display name |
-| `zone` | – | zone the valve belongs to; without a zone it is disabled |
+| `zone` | – | zone the valve belongs to; without a zone the valve is set directly, like a zone in `manual` mode |
 | `min_pos` | 0 % | **minimum opening**, never undershot except while calibrating |
 | `max_pos` | 100 % | maximum opening |
 | `factor` | 100 % | scaling of the zone output |
@@ -157,8 +157,16 @@ A PI controller per zone in `control` mode.
 - **Bumpless switching** from `manual` to `control`: the integral starts
   from the current valve position.
 - **Stale `control_source`:** the controller holds its state and the zone
-  goes to its fallback position. A diagnostic flag is set and a log entry
-  written. When values arrive again, control resumes.
+  goes to its fallback position. The fallback is a valve position: the
+  factor is not applied, the limits are. A diagnostic flag is set and a log
+  entry written. When values arrive again, control resumes; the first
+  integration step after the pause is capped at two sample times.
+- **Start-up:** a source without a value is *pending* for 120 s after the
+  start. Meanwhile the valves keep their position (or the restored
+  controller output); only after that a missing value leads to the
+  fallback position. The controller starts bumpless from the current
+  valve positions, so it waits until the STM32 has reported them.
+- **Removing** a source or zone clears the references to it (zones, valves).
 - **The controller state survives an ESP32 restart:** it is kept in RTC RAM
   as in 1.x, and the setpoint is stored in the configuration.
 

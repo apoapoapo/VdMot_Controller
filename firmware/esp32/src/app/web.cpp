@@ -8,10 +8,15 @@
 #include <Update.h>
 #include <WebServer.h>
 #include <esp_ota_ops.h>
+#include <math.h>
+#include <time.h>
 
+#include "app/control.h"
 #include "app/network.h"
+#include "app/settings.h"
 #include "app/shared.h"
 #include "app/web_page.h"
+#include "core/config_store.h"
 #include "core/stm32_flasher.h"
 #include "vdm/codec.h"
 
@@ -26,7 +31,8 @@ namespace
 {
 
 WebServer server(80);
-vdm::Model g_model; /* copy for the handlers, large: keep it off the stack */
+vdm::Model &g_model = *new vdm::Model();  /* copy for the handlers, large: heap */
+vdm::Config &g_next = *new vdm::Config(); /* configuration being changed */
 bool g_upload_ok = false;
 String g_upload_error;
 size_t g_upload_size = 0;
@@ -37,11 +43,11 @@ const esp_partition_t *otherApp(esp_app_desc_t *desc);
 
 bool authorized()
 {
-    const NetSettings &n = netSettings();
-    if (n.web_user[0] == '\0') {
+    const vdm::DeviceConfig &d = config().device;
+    if (d.web_user[0] == '\0') {
         return true;
     }
-    if (server.authenticate(n.web_user, n.web_pwd)) {
+    if (server.authenticate(d.web_user, d.web_pwd)) {
         return true;
     }
     server.requestAuthentication(BASIC_AUTH, "VdMot");
@@ -128,6 +134,67 @@ void putMotorParams(JsonObject o, const vdm_motor_params_t &m)
     o["max_calib_retries"] = m.max_calib_retries;
 }
 
+/* live values of the room control */
+void putControl(JsonObject o)
+{
+    const vdm::Config &c = config();
+    const vdm::ControlEngine &e = engine();
+
+    JsonArray zones = o.createNestedArray("zones");
+    for (uint8_t i = 0; i < c.zone_count; i++) {
+        const vdm::ZoneConfig &zc = c.zones[i];
+        const vdm::ZoneStatus &z = e.zone(i);
+        JsonObject zo = zones.createNestedObject();
+        zo["id"] = zc.id;
+        zo["name"] = zc.name;
+        zo["mode"] = vdm::zoneModeName(zc.mode);
+        zo["heating"] = zc.heating;
+        zo["setpoint"] = zc.setpoint;
+        zo["source"] = vdm::sourceStateName(z.source);
+        if (z.has_temperature) {
+            zo["temperature"] = roundf(z.temperature * 100.0f) / 100.0f;
+        }
+        if (z.has_output) {
+            zo["output"] = roundf(z.output * 10.0f) / 10.0f;
+        }
+        zo["action"] = vdm::zoneActionName(z.action);
+    }
+
+    JsonArray valves = o.createNestedArray("valves");
+    for (uint8_t ch = 0; ch < VDM_MAX_CHANNELS; ch++) {
+        const vdm::ValveStatus &v = e.valve(ch);
+        JsonObject vo = valves.createNestedObject();
+        vo["name"] = c.valves[ch].name;
+        vo["zone"] = c.valves[ch].zone;
+        vo["controlled"] = v.controlled;
+        vo["eligible"] = v.eligible;
+        if (v.has_target) {
+            vo["requested"] = v.requested;
+            vo["effective"] = v.effective;
+        }
+    }
+
+    JsonArray sources = o.createNestedArray("sources");
+    for (uint8_t i = 0; i < c.source_count; i++) {
+        const vdm::SourceStatus &s = e.source(i);
+        JsonObject so = sources.createNestedObject();
+        so["id"] = c.sources[i].id;
+        so["state"] = vdm::sourceStateName(s.state);
+        if (s.has_value) {
+            so["value"] = roundf(s.value * 100.0f) / 100.0f;
+            so["age"] = s.age_s;
+        }
+    }
+
+    const vdm::FlowStatus &f = e.flow();
+    JsonObject fo = o.createNestedObject("flow");
+    fo["active"] = f.active;
+    fo["insufficient"] = f.insufficient;
+    fo["total"] = f.total;
+    fo["added"] = f.added;
+    fo["min_total"] = c.flow.min_total_pct * 10u;
+}
+
 void handleState()
 {
     if (!authorized()) {
@@ -137,7 +204,7 @@ void handleState()
     readModel(g_model, err, sizeof(err));
     const vdm::Model &m = g_model;
 
-    DynamicJsonDocument doc(24576);
+    DynamicJsonDocument doc(40960);
     JsonObject esp = doc.createNestedObject("esp");
     char v[24];
     snprintf(v, sizeof(v), "%d.%d.%d+%lu", FW_VERSION_MAJOR, FW_VERSION_MINOR, FW_VERSION_PATCH,
@@ -161,7 +228,17 @@ void handleState()
     net["rssi"] = ns.rssi;
     net["ap"] = ns.ap_active;
     net["ap_ssid"] = ns.ap_ssid;
-    net["hostname"] = netSettings().hostname;
+    net["hostname"] = hostname();
+    time_t now_s = time(nullptr);
+    if (now_s > 1600000000) {
+        struct tm lt;
+        localtime_r(&now_s, &lt);
+        char tb[24];
+        strftime(tb, sizeof(tb), "%Y-%m-%d %H:%M", &lt);
+        net["time"] = tb;
+    }
+    doc["device"] = config().device.name;
+    doc["config"] = settingsLoadInfo();
 
     JsonObject link = doc.createNestedObject("link");
     link["state"] = vdm::linkStateName(m.state);
@@ -262,6 +339,8 @@ void handleState()
     up["result"] = u.result;
     up["detail"] = u.detail;
 
+    putControl(doc.createNestedObject("ctl"));
+
     JsonArray log = doc.createNestedArray("log");
     for (uint8_t i = 0; i < m.log_count; i++) {
         const vdm::LogEntry &e = m.log[(m.log_head + i) % vdm::Model::kLogSize];
@@ -269,6 +348,16 @@ void handleState()
         o["ms"] = e.ms;
         o["level"] = e.level;
         o["text"] = e.text;
+        o["src"] = "stm";
+    }
+    static vdm::LogEntry esp_log[kEspLogSize];
+    uint8_t n = espLogCopy(esp_log, kEspLogSize);
+    for (uint8_t i = 0; i < n; i++) {
+        JsonObject o = log.createNestedObject();
+        o["ms"] = esp_log[i].ms;
+        o["level"] = esp_log[i].level;
+        o["text"] = esp_log[i].text;
+        o["src"] = "esp";
     }
     doc["error"] = err;
 
@@ -289,9 +378,144 @@ void handleTarget()
         reply(false, "ch 0..11 and pos 0..100 required");
         return;
     }
-    reply(command(CommandType::SetTarget, static_cast<uint16_t>(pos * 10.0f + 0.5f),
-                  static_cast<uint8_t>(ch)),
-          "queue full");
+    switch (controlSetTarget(static_cast<uint8_t>(ch), static_cast<uint16_t>(pos * 10.0f + 0.5f))) {
+    case vdm::ControlEngine::Result::Ok:
+        reply(true);
+        break;
+    case vdm::ControlEngine::Result::Controlled:
+        reply(false, "the valve belongs to a zone in mode control: change the setpoint or "
+                     "switch the zone to manual");
+        break;
+    default:
+        reply(false, "invalid channel or position");
+        break;
+    }
+}
+
+/* --- configuration ------------------------------------------------------ */
+
+void handleConfigGet()
+{
+    if (!authorized()) {
+        return;
+    }
+    static DynamicJsonDocument doc(vdm::kConfigJsonCapacity);
+    doc.clear();
+    vdm::configToJson(config(), doc.to<JsonObject>(), false);
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+}
+
+bool restartNeeded(const vdm::Config &a, const vdm::Config &b)
+{
+    const vdm::NetworkConfig &x = a.network, &y = b.network;
+    return x.mode != y.mode || x.dhcp != y.dhcp || x.ip != y.ip || x.mask != y.mask ||
+           x.gateway != y.gateway || x.dns != y.dns || strcmp(x.ssid, y.ssid) != 0 ||
+           strcmp(x.wifi_pwd, y.wifi_pwd) != 0 || strcmp(a.device.name, b.device.name) != 0 ||
+           strcmp(a.device.tz, b.device.tz) != 0 || strcmp(a.device.ntp, b.device.ntp) != 0;
+}
+
+void replyCommit(const vdm::Config &next)
+{
+    bool restart = restartNeeded(config(), next);
+    if (!settingsCommit(next)) {
+        reply(false, "the configuration is active but could not be saved");
+        return;
+    }
+    StaticJsonDocument<96> doc;
+    doc["ok"] = true;
+    doc["restart"] = restart;
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+}
+
+void handleConfigSection()
+{
+    if (!authorized()) {
+        return;
+    }
+    static DynamicJsonDocument in(16384);
+    DeserializationError e = deserializeJson(in, server.arg("plain"));
+    if (e) {
+        reply(false, String("invalid JSON: ") + e.c_str());
+        return;
+    }
+    char err[128];
+    if (!vdm::configApplySection(config(), server.arg("section").c_str(), in.as<JsonVariantConst>(),
+                                 g_next, err, sizeof(err))) {
+        reply(false, err);
+        return;
+    }
+    replyCommit(g_next);
+}
+
+void handleConfigExport()
+{
+    if (!authorized()) {
+        return;
+    }
+    std::string text = vdm::ConfigStore::toText(config(), true, true);
+    char disp[96];
+    snprintf(disp, sizeof(disp), "attachment; filename=\"%s-config.json\"", hostname());
+    server.sendHeader("Content-Disposition", disp);
+    server.send(200, "application/json", text.c_str());
+}
+
+void handleConfigImport()
+{
+    if (!authorized()) {
+        return;
+    }
+    char err[128];
+    std::string text(server.arg("plain").c_str());
+    if (!vdm::ConfigStore::fromText(text, g_next, err, sizeof(err))) {
+        reply(false, err);
+        return;
+    }
+    if (!settingsCommit(g_next)) {
+        reply(false, "the configuration could not be saved");
+        return;
+    }
+    espLog(VDM_LOG_INFO, "configuration imported, restarting");
+    reply(true);
+    g_reboot_at = millis() + 1000;
+}
+
+/* setpoint, mode and heating of one zone */
+void handleZone()
+{
+    if (!authorized()) {
+        return;
+    }
+    int zi = config().zoneIndex(server.arg("id").c_str());
+    if (zi < 0) {
+        reply(false, "unknown zone");
+        return;
+    }
+    vdm::ZoneConfig &z = settingsEdit().zones[zi];
+    if (server.hasArg("setpoint")) {
+        float sp = server.arg("setpoint").toFloat();
+        if (sp < 5.0f || sp > 30.0f) {
+            reply(false, "setpoint must be 5..30 \u00b0C");
+            return;
+        }
+        z.setpoint = roundf(sp * 10.0f) / 10.0f;
+    }
+    if (server.hasArg("mode")) {
+        String m = server.arg("mode");
+        if (m != "control" && m != "manual") {
+            reply(false, "mode must be control or manual");
+            return;
+        }
+        z.mode = m == "control" ? vdm::ZoneMode::Control : vdm::ZoneMode::Manual;
+    }
+    if (server.hasArg("heating")) {
+        z.heating = server.arg("heating") == "1" || server.arg("heating") == "true";
+    }
+    settingsChanged();
+    reply(true);
 }
 
 void handleMaskCommand(CommandType t)
@@ -357,6 +581,8 @@ void handleSystemConfig()
         reply(false, "missing or out-of-range value (see docs/protocol)");
         return;
     }
+    /* the failsafe position follows the fallback position (flow settings) */
+    s.failsafe_pos = static_cast<uint16_t>(config().flow.fallback_pct * 10u);
     reply(sendCommand(c), "queue full");
 }
 
@@ -573,6 +799,11 @@ void webBegin()
         }
         reply(command(CommandType::PauseLink, static_cast<uint16_t>(sec)), "queue full");
     });
+    server.on("/api/config", HTTP_GET, handleConfigGet);
+    server.on("/api/config", HTTP_POST, handleConfigSection);
+    server.on("/api/config/export", HTTP_GET, handleConfigExport);
+    server.on("/api/config/import", HTTP_POST, handleConfigImport);
+    server.on("/api/zone", HTTP_POST, handleZone);
     server.on("/api/config/system", HTTP_POST, handleSystemConfig);
     server.on("/api/config/motor", HTTP_POST, handleMotorParams);
     server.on("/api/config/channels", HTTP_POST, handleChannels);

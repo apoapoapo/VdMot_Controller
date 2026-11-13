@@ -18,6 +18,7 @@ namespace app
 
 enum class CommandType : uint8_t {
     SetTarget,
+    SetTargets, /* mask + targets[] */
     Calibrate,
     Detect,
     Stop,
@@ -35,6 +36,8 @@ struct Command {
     CommandType type;
     uint8_t channel;
     uint16_t value;
+    uint16_t mask;
+    uint16_t targets[VDM_MAX_CHANNELS];
     vdm_system_config_t sys;
     vdm_motor_params_t motor;
 };
@@ -59,5 +62,11 @@ bool readModel(vdm::Model &out, char *last_error, size_t err_len);
 
 void setUpdateStatus(const UpdateStatus &s);
 UpdateStatus updateStatus();
+
+/* log of the ESP32 itself (control, configuration), shown with the STM32 log */
+constexpr uint8_t kEspLogSize = 16;
+void espLog(uint8_t level, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+/* copies the entries, oldest first; returns the count */
+uint8_t espLogCopy(vdm::LogEntry *out, uint8_t max);
 
 } // namespace app

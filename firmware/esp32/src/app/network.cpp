@@ -3,9 +3,10 @@
  */
 #include "app/network.h"
 
+#include "app/settings.h"
+
 #include <ESPmDNS.h>
 #include <ETH.h>
-#include <Preferences.h>
 #include <WiFi.h>
 
 namespace app
@@ -24,7 +25,6 @@ constexpr uint32_t kWifiFallbackMs = 10000; /* auto mode: no Ethernet IP yet */
 constexpr uint32_t kApFallbackMs = 30000;   /* nothing works: open the setup AP */
 constexpr const char *kApPassword = "vdmot-setup";
 
-NetSettings g_settings;
 volatile bool g_eth_ip = false;
 volatile bool g_wifi_ip = false;
 bool g_wifi_started = false;
@@ -32,65 +32,13 @@ bool g_ap_started = false;
 bool g_mdns_started = false;
 uint32_t g_start_ms = 0;
 String g_ap_ssid;
-
-void sanitizeHostname(char *h)
-{
-    size_t w = 0;
-    for (size_t r = 0; h[r] != '\0' && w < 32; r++) {
-        char c = h[r];
-        if (isalnum(static_cast<unsigned char>(c)) || c == '-') {
-            h[w++] = static_cast<char>(tolower(c));
-        } else if (c == ' ' || c == '_') {
-            h[w++] = '-';
-        }
-    }
-    h[w] = '\0';
-    if (w == 0) {
-        strlcpy(h, "vdmot", 33);
-    }
-}
-
-void loadLegacySettings()
-{
-    Preferences p;
-    if (p.begin("netCfg", true)) { /* read-only */
-        g_settings.mode = p.getUChar("ethwifi", 0);
-        g_settings.dhcp = p.getUChar("dhcp", 1) != 0;
-        g_settings.ip = p.getULong("staticIp", 0);
-        g_settings.mask = p.getULong("mask", 0);
-        g_settings.gateway = p.getULong("gw", 0);
-        g_settings.dns = p.getULong("dnsIp", 0);
-        if (p.isKey("ssid")) {
-            p.getString("ssid", g_settings.ssid, sizeof(g_settings.ssid));
-        }
-        if (p.isKey("pwd")) {
-            p.getString("pwd", g_settings.wifi_pwd, sizeof(g_settings.wifi_pwd));
-        }
-        if (p.isKey("userName")) {
-            p.getString("userName", g_settings.web_user, sizeof(g_settings.web_user));
-        }
-        if (p.isKey("userPwd")) {
-            p.getString("userPwd", g_settings.web_pwd, sizeof(g_settings.web_pwd));
-        }
-        p.end();
-    }
-    if (p.begin("sysCfg", true)) {
-        if (p.isKey("stName")) {
-            p.getString("stName", g_settings.hostname, sizeof(g_settings.hostname));
-        }
-        p.end();
-    }
-    sanitizeHostname(g_settings.hostname);
-    if (g_settings.mode > 2) {
-        g_settings.mode = 0;
-    }
-}
+vdm::NetworkConfig g_net; /* settings at the start; changes need a restart */
 
 void onEvent(arduino_event_id_t event)
 {
     switch (event) {
     case ARDUINO_EVENT_ETH_START:
-        ETH.setHostname(g_settings.hostname);
+        ETH.setHostname(hostname());
         break;
     case ARDUINO_EVENT_ETH_GOT_IP:
         g_eth_ip = true;
@@ -114,25 +62,25 @@ void onEvent(arduino_event_id_t event)
 void startEthernet()
 {
     ETH.begin(kEthAddr, kEthPower, kEthMdc, kEthMdio, ETH_PHY_LAN8720, ETH_CLOCK_GPIO0_IN);
-    if (!g_settings.dhcp && g_settings.ip != 0) {
-        ETH.config(IPAddress(g_settings.ip), IPAddress(g_settings.gateway),
-                   IPAddress(g_settings.mask), IPAddress(g_settings.dns));
+    if (!g_net.dhcp) {
+        ETH.config(IPAddress(g_net.ip), IPAddress(g_net.gateway), IPAddress(g_net.mask),
+                   IPAddress(g_net.dns));
     }
 }
 
 void startWifi()
 {
-    if (g_wifi_started || g_settings.ssid[0] == '\0') {
+    if (g_wifi_started || g_net.ssid[0] == '\0') {
         return;
     }
     g_wifi_started = true;
     WiFi.mode(g_ap_started ? WIFI_AP_STA : WIFI_STA);
-    WiFi.setHostname(g_settings.hostname);
-    if (!g_settings.dhcp && g_settings.ip != 0) {
-        WiFi.config(IPAddress(g_settings.ip), IPAddress(g_settings.gateway),
-                    IPAddress(g_settings.mask), IPAddress(g_settings.dns));
+    WiFi.setHostname(hostname());
+    if (!g_net.dhcp) {
+        WiFi.config(IPAddress(g_net.ip), IPAddress(g_net.gateway), IPAddress(g_net.mask),
+                    IPAddress(g_net.dns));
     }
-    WiFi.begin(g_settings.ssid, g_settings.wifi_pwd);
+    WiFi.begin(g_net.ssid, g_net.wifi_pwd);
 }
 
 void startAp()
@@ -154,38 +102,33 @@ void startAp()
 
 void networkBegin()
 {
-    loadLegacySettings();
+    g_net = config().network;
     WiFi.onEvent(onEvent);
     g_start_ms = millis();
-    if (g_settings.mode != 2) {
+    if (g_net.mode != vdm::NetMode::Wifi) {
         startEthernet();
-    }
-    if (g_settings.mode == 2) {
+    } else {
         startWifi();
     }
+    configTzTime(config().device.tz, config().device.ntp);
 }
 
 void networkLoop()
 {
     uint32_t t = millis() - g_start_ms;
     bool up = g_eth_ip || g_wifi_ip;
-    if (!up && g_settings.mode == 0 && t >= kWifiFallbackMs) {
+    if (!up && g_net.mode == vdm::NetMode::Auto && t >= kWifiFallbackMs) {
         startWifi();
     }
     if (!up && t >= kApFallbackMs) {
         startAp();
     }
     if ((up || g_ap_started) && !g_mdns_started) {
-        g_mdns_started = MDNS.begin(g_settings.hostname);
+        g_mdns_started = MDNS.begin(hostname());
         if (g_mdns_started) {
             MDNS.addService("http", "tcp", 80);
         }
     }
-}
-
-const NetSettings &netSettings()
-{
-    return g_settings;
 }
 
 NetStatus netStatus()

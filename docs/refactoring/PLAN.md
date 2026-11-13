@@ -174,12 +174,21 @@ Done (2a, bring-up for the first hardware test):
   firmware), basic auth with the legacy web login, task watchdog.
 - Hardware test guide: [`../testing/hardware-bringup.md`](../testing/hardware-bringup.md).
 
-Open (2b): see the design [`../design/esp32-control-and-integration.md`](../design/esp32-control-and-integration.md)
-- configuration store (JSON on LittleFS, versioned, atomic), network/device/
-  MQTT settings; the legacy configuration is not taken over (decided)
-- temperature sources (1-Wire, MQTT, later KNX), zones with one or more
-  valves, PI controller per zone, flow guard (minimum opening per valve
-  and in total), fallback position
+Done (2b), see the design [`../design/esp32-control-and-integration.md`](../design/esp32-control-and-integration.md):
+- `src/core` (host tested): `Config` (JSON, validation, sections with id
+  assignment and reference clean-up), `ConfigStore` (atomic write with
+  temporary file and backup), `ControlEngine` (temperature sources with
+  stale detection and start-up grace, zones in mode control/manual, PI
+  controller with conditional integration, bumpless start and RTC
+  snapshot, valve limits and factor, flow guard with priority valves),
+  tests with a room model in closed loop.
+- `src/app`: settings owner (`/config.json`, network settings taken over
+  once from the legacy NVS), control loop (targets to the STM32, STM32
+  failsafe position = fallback position, controller state in RTC RAM,
+  log), network from the configuration, web page with tabs (overview,
+  rooms & valves, settings, system) and configuration export/import.
+
+Open: syslog, MQTT sources take effect with phase 3.
 
 ### Phase 3 – MQTT / Home Assistant
 - LWT + birth message, `availability_topic`, client id derived from MAC.
