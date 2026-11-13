@@ -94,6 +94,7 @@ function act(a,ch){const f=new FormData();if(ch!==undefined)f.append('ch',ch);po
 let lastState=null;
 function defaults(id,kind){const d=lastState&&lastState.defaults&&lastState.defaults[kind];if(!d)return;
 Object.entries(d).forEach(([k,v])=>{const i=$(id).querySelector(`[name=${k}]`);if(i)i.value=v});dirty.add(id);toast('Defaults loaded – click Save to apply')}
+let espUpload=false;
 function setT(ch){const v=$('t'+ch).value;const f=new FormData();f.append('ch',ch);f.append('pos',v);editing.delete(ch);post('target',f)}
 /* forms with unsaved edits are not overwritten by the periodic refresh */
 const dirty=new Set();const FORMID={system:'sysf',motor:'motf',channels:'chans'};
@@ -102,7 +103,7 @@ async function save(kind,form){const j=await post('config/'+kind,new FormData(fo
 function flags(f){const n=[];if(f&1)n.push('cal');if(f&2)n.push('cal pending');if(f&4)n.push('pos?');if(f&8)n.push('end');if(f&16)n.push('failsafe');return n.join(', ')}
 function upload(kind){const fi=$(kind==='esp'?'fesp':'fstm').files[0];if(!fi){alert('choose a file');return}
 const x=new XMLHttpRequest();const f=new FormData();f.append('file',fi,fi.name);
-x.upload.onprogress=e=>{$('prog').value=e.loaded*100/e.total;$('upd').textContent='uploading '+kind};
+espUpload=kind==='esp';x.upload.onprogress=e=>{$('prog').value=e.loaded*100/e.total;$('upd').textContent='uploading '+kind};
 x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}$('upd').textContent=j.ok?(kind==='esp'?'ESP32 updated, restarting…':'flashing STM32…'):('error: '+(j.error||x.status))};
 x.open('POST','/api/'+kind+'/firmware');x.send(f)}
 function fill(id,fields,vals,defs){const g=$(id);if(!formsDone)g.innerHTML=fields.map(([k,l])=>`<label data-k=${k}><span>${l} <small class=def></small></span><input type=number name=${k}></label>`).join('');
@@ -113,12 +114,15 @@ async function refresh(){let s;try{s=await (await fetch('/api/state')).json()}ca
 const l=s.link;$('link').textContent='STM32 '+l.state;$('link').className='pill '+(l.state==='connected'?'ok':'bad');
 $('ver').textContent='ESP32 '+s.esp.version+(s.stm?(' · STM32 '+s.stm.version+' ('+s.stm.mcu+', '+s.stm.hw+') · boot #'+s.stm.boot_count+', last reset: '+(RESETS[s.stm.reset_cause]||s.stm.reset_cause)+', up '+dur(s.diag&&s.diag.stm_uptime_s)):'');
 $('net').textContent=s.net.interface+' '+s.net.ip+(s.net.ap?(' · AP '+s.net.ap_ssid):'');$('err').textContent=s.error||'';
-$('valves').innerHTML=s.valves.map(v=>{const m=MODES[v.mode]||v.mode;const cls=v.mode===8?'bad':(v.mode===2||v.mode===0?'mut':'');
-const keep=editing.has(v.ch)&&$('t'+v.ch)?$('t'+v.ch).value:(v.target/10);
-return `<tr><td>${v.ch+1}</td><td class="${cls}">${m}${v.fault?' – '+FAULTS[v.fault]:''}</td><td class=num>${pct(v.actual)}</td><td class=num>${pct(v.target)}</td>
-<td><input id=t${v.ch} type=number min=0 max=100 step=0.5 value="${keep}" oninput="editing.add(${v.ch})"><button onclick="setT(${v.ch})">Set</button></td>
-<td class=num>${(v.current/10).toFixed(1)}</td><td>${flags(v.flags)}</td><td class=num>${v.open_counts??''}/${v.close_counts??''}</td><td class=num>${v.moves??''}</td>
-<td><button onclick="act('calibrate',${v.ch})">Calibrate</button></td></tr>`}).join('');
+/* the valve table is built once; afterwards only the cells are updated, so
+ * an input that has the focus is not replaced */
+if($('valves').rows.length!==s.valves.length)$('valves').innerHTML=s.valves.map(v=>`<tr id=vr${v.ch}><td>${v.ch+1}</td><td></td><td class=num></td><td class=num></td>
+<td><input id=t${v.ch} type=number min=0 max=100 step=0.5 oninput="editing.add(${v.ch})"><button onclick="setT(${v.ch})">Set</button></td>
+<td class=num></td><td></td><td class=num></td><td class=num></td><td><button onclick="act('calibrate',${v.ch})">Calibrate</button></td></tr>`).join('');
+s.valves.forEach(v=>{const c=$('vr'+v.ch).cells;c[1].className=v.mode===8?'bad':(v.mode===2||v.mode===0?'mut':'');
+c[1].textContent=(MODES[v.mode]||v.mode)+(v.fault?' – '+FAULTS[v.fault]:'');c[2].textContent=pct(v.actual);c[3].textContent=pct(v.target);
+const i=$('t'+v.ch);if(!editing.has(v.ch)&&document.activeElement!==i)i.value=v.target/10;
+c[5].textContent=(v.current/10).toFixed(1);c[6].textContent=flags(v.flags);c[7].textContent=(v.open_counts??'')+'/'+(v.close_counts??'');c[8].textContent=v.moves??''});
 $('sensors').innerHTML=s.sensors.map(x=>{const t=x.kind===2||x.kind===3;return `<tr><td>${x.rom}</td><td>${KINDS[x.kind]||x.kind}</td>
 <td class=num>${x.age===65535?'':(x.value/1000).toFixed(t?3:2)}</td><td class="${x.status?'warn':''}">${SSTAT[x.status]||x.status}</td><td class=num>${x.age===65535?'':x.age}</td></tr>`}).join('');
 $('scan').textContent=s.scan?`${s.scan.total} devices, bus ${s.scan.bus_ok?'ok':'error'}`:'';
@@ -127,7 +131,7 @@ if(!formsDone){$('chans').innerHTML=s.valves.map(v=>`<label style="display:inlin
 if(!dirty.has('chans'))s.valves.forEach(v=>{$('chans').querySelector(`[value="${v.ch}"]`).checked=v.mode!==0});
 formsDone=true;
 const p=s.esp.previous;$('prev').textContent=p?`Previous ESP32 firmware in the other slot: ${p.project} ${p.version} (${p.date})`:'No previous ESP32 firmware';$('rb').disabled=!p;
-const u=s.update;if(u.active||u.result){$('prog').value=u.percent;$('upd').textContent=`STM32 update: ${u.phase} ${u.percent}% ${u.result||''}`;
+const u=s.update;if(!espUpload&&(u.active||u.result)){$('prog').value=u.percent;$('upd').textContent=u.active?`STM32 update: ${u.phase} ${u.percent}%`:`Last STM32 update: ${u.result||u.phase}`;
 const ask=u.active&&u.phase.indexOf('RESET')>=0;$('upd').className=ask?'warn':'mut';$('upd').style.fontWeight=ask?'700':'';
 if(ask)$('upd').textContent='Press the RESET button on the STM32 (BlackPill) now – waiting up to 30 s';$('updd').textContent=u.detail?('Bootloader entry: '+u.detail):''}
 const d=Object.assign({},s.link.stats,s.diag||{});$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');

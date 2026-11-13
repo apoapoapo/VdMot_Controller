@@ -491,7 +491,10 @@ void LinkClient::onEvent(const vdm_frame_t &f, uint32_t now_ms)
             char text[64];
             int n = snprintf(text, sizeof(text), "STM32 restarted (reset cause: %s)",
                              cause <= 6 ? kCauses[cause] : "?");
-            model_.addLog(now_ms, cause == VDM_RESET_SOFTWARE ? VDM_LOG_INFO : VDM_LOG_WARN, text,
+            /* wanted restarts are info; watchdog, brown-out etc. hint at a problem */
+            bool expected = cause == VDM_RESET_SOFTWARE || cause == VDM_RESET_PIN ||
+                            cause == VDM_RESET_POWER_ON;
+            model_.addLog(now_ms, expected ? VDM_LOG_INFO : VDM_LOG_WARN, text,
                           n > 0 ? static_cast<size_t>(n) : 0u);
         }
         if (model_.state != LinkState::Incompatible) {
