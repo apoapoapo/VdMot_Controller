@@ -1,161 +1,161 @@
-# VdMot Controller – Neuaufbau der Firmware (v2)
+# VdMot Controller – Firmware rebuild (v2)
 
-Stand: 2026-11-13 · Status: Planung
+Date: 2026-11-13 · Status: planning
 
-Dieses Dokument hält fest, **warum** die Firmware neu aufgebaut wird, **welche
-Entscheidungen** getroffen wurden und **in welcher Reihenfolge** gearbeitet wird.
-Details zum UART-Protokoll stehen in
-[`../protocol/stm32-esp32-link.md`](../protocol/stm32-esp32-link.md).
+This document records **why** the firmware is being rebuilt, **which decisions**
+have been made and **in which order** the work is done. The UART protocol is
+specified in [`../protocol/stm32-esp32-link.md`](../protocol/stm32-esp32-link.md).
 
 ---
 
-## 1. Ausgangslage
+## 1. Starting point
 
-Die Hardware (C2-Revision, STM32F411 „BlackPill“ WeAct V3.0, WT32-ETH01) ist gut.
-Die vorhandene Firmware (v1.4.x) hat strukturelle Probleme, die sich nicht durch
-Einzelfixes beheben lassen. Die wichtigsten (Auszug aus dem Code-Review):
+The hardware (C2 revision, STM32F411 "BlackPill" WeAct V3.0, WT32-ETH01) is good.
+The existing firmware (v1.4.x) has structural problems that cannot be fixed with
+isolated patches. The most important ones (excerpt from the code review):
 
-| Bereich | Problem | Auswirkung |
+| Area | Problem | Effect |
 |---|---|---|
-| STM32 Motor | Kommando (`valvenr`, `command`, `poschangecmd`) wird ohne Schutz zwischen Main-Loop und 10-ms-ISR übergeben | falsches Ventil / falscher Weg, Drift |
-| STM32 Motor | Position wird nur nominell aufaddiert, gezählte Impulse nicht zurückgeführt, `scaler` ganzzahlig, `deadzone` unbenutzt und `unsigned` (Unterlauf) | Positionsdrift |
-| STM32 Motor | Unterstrom-Zähler kumulativ statt konsekutiv | Ventil wird als „open circuit“ markiert und verschwindet |
-| STM32 Motor | `delay(100)` im ISR-Pfad (MUX-Umschaltung) | Strommessung steht, UART-Bytes gehen verloren |
-| STM32 | Kalibrierung/Position nicht persistent, EEPROM ohne Version/CRC, kein Watchdog, kein BOR | nach jedem Boot Neulernen aller Ventile; Hänger ohne Recovery |
-| STM32 1-Wire | Bus-Index und DS18-Index vermischt, blockierende ROM-Suchen | Temperaturen am falschen Ventil |
-| UART-Protokoll | Text, kein Framing/CRC/Sequenznummer, Pufferüberläufe auf beiden Seiten, nur erste Zeile im Puffer wird verarbeitet, `gvlst`-Parser zählt Index doppelt | verlorene/falsch zugeordnete Antworten |
-| ESP32 | AsyncWebServer-Callbacks schreiben ohne Locks in globalen Zustand, `yieldTask()` startet den Scheduler im falschen Thread, alle Watchdogs aus | sporadische Fehler, Hänger |
-| ESP32 Config | NVS-Struct-Blobs ohne Version/CRC | Layoutänderung zerstört Konfiguration |
-| ESP32 MQTT/HA | kein LWT/Availability, Client-ID = Stationsname, Ist-Position nie publiziert, Discovery-Entitäten ohne Daten bzw. ohne Subscription, Discovery blockiert ~20 s | HA-Anbindung unzuverlässig |
-| ESP32 Sicherheit | kein Endpoint wirklich geschützt (Reboot, OTA, Config), SMTP-Passwort im Klartext an die UI | – |
-| PI-Regler | Δt aus `time()` (SNTP-Sprung), Startposition = Temperatur statt % | Integrator-Schläge |
+| STM32 motor | Command (`valvenr`, `command`, `poschangecmd`) is handed from main loop to the 10 ms ISR without protection | wrong valve / wrong travel, drift |
+| STM32 motor | Position is only accumulated nominally, counted pulses are never fed back; `scaler` is an integer; `deadzone` is unused and `unsigned` (underflow) | position drift |
+| STM32 motor | Undercurrent counter is cumulative instead of consecutive | valve is flagged "open circuit" and disappears |
+| STM32 motor | `delay(100)` in the ISR path (MUX switching) | current measurement stalls, UART bytes are lost |
+| STM32 | Calibration/position not persisted, EEPROM without version/CRC, no watchdog, no BOR | all valves re-learn after every boot; hangs never recover |
+| STM32 1-Wire | Bus index and DS18 index are mixed up, blocking ROM searches | temperatures assigned to the wrong valve |
+| UART protocol | Text based, no framing/CRC/sequence number, buffer overflows on both sides, only the first line in the buffer is processed, `gvlst` parser increments the index twice | lost or misassigned responses |
+| ESP32 | AsyncWebServer callbacks write global state without locks, `yieldTask()` runs the scheduler on the wrong thread, all watchdogs disabled | sporadic faults, hangs |
+| ESP32 config | NVS struct blobs without version/CRC | any layout change corrupts the configuration |
+| ESP32 MQTT/HA | No LWT/availability, client id = station name, actual position never published, discovery entities without data or without subscription, discovery blocks for ~20 s | unreliable Home Assistant integration |
+| ESP32 security | No endpoint is actually protected (reboot, OTA, config), SMTP password sent to the UI in clear text | – |
+| PI controller | Δt taken from `time()` (SNTP jump), start position set from a temperature instead of a percentage | integrator kicks |
 
-Ein schrittweises Refactoring würde fast jede Zeile anfassen. Deshalb:
-**Neuaufbau nach dem Strangler-Prinzip** – Hardwarewissen und brauchbare
-Algorithmen (Endstop-Erkennung über Strom, Back-EMF-Zählung, PI-Grundstruktur,
-STM32-ROM-Bootloader-Update) werden übernommen, die Struktur nicht.
+An incremental refactoring would touch almost every line. Therefore:
+**rebuild following the strangler pattern** – hardware knowledge and the useful
+algorithms (current-based endstop detection, back-EMF pulse counting, basic PI
+structure, STM32 update via ROM bootloader) are kept, the structure is not.
 
 ---
 
-## 2. Getroffene Entscheidungen
+## 2. Decisions
 
-| # | Entscheidung | Begründung |
+| # | Decision | Rationale |
 |---|---|---|
-| D1 | Neuaufbau im **eigenen Fork** (`apoapoapo/VdMot_Controller`), neue Firmware in neuen Verzeichnissen; der alte Code bleibt bis zur Ablösung unverändert liegen | Historie und Urheberschaft bleiben sichtbar, kein Big-Bang |
-| D2 | Lizenz bleibt **GPLv3**; vorhandene Copyright-Hinweise bleiben in übernommenen Teilen erhalten, neue Dateien tragen eigenen Header + GPLv3-Hinweis | Pflicht aus der GPL bei abgeleiteten Werken |
-| D3 | Eigene Versionierung ab **2.0.0** (SemVer), eigene GitHub-Releases im Fork; README verweist auf Upstream (Lenti84 / SurfGargano) | klare Abgrenzung zu den 1.x-Releases von Upstream |
-| D4 | STM32 = reiner Echtzeit-Aktor, ESP32 = Logik/Konfiguration/Integration | eine Quelle der Wahrheit pro Thema |
-| D5 | Neues **binäres UART-Protokoll** (COBS + CRC16, Sequenznummern, Request/Response + Events), gemeinsamer Header für beide Seiten | siehe Protokoll-Spezifikation |
-| D6 | STM32 und ESP32 werden immer **zusammen** aktualisiert (ESP flasht STM über ROM-Bootloader); keine Kompatibilität zum 1.x-Textprotokoll | spart Übergangscode |
-| D7 | Integration zuerst **MQTT / Home Assistant**; KNX wird später als eigener Adapter besprochen | HA ist fast vorhanden, schnellster Nutzen |
-| D8 | Zielhardware zunächst **C2 + STM32F411**; F401 und C1 bleiben über Build-Environments möglich, werden aber nicht primär getestet | vorhandene Hardware |
+| D1 | Rebuild in the **own fork** (`apoapoapo/VdMot_Controller`); new firmware lives in new directories; the old code stays untouched until it is replaced | history and authorship stay visible, no big bang |
+| D2 | License stays **GPLv3**; existing copyright notices are kept in any reused code, new files carry their own header plus the GPLv3 notice | required by the GPL for derived works |
+| D3 | Own versioning starting at **2.0.0** (SemVer), own GitHub releases in the fork; README credits upstream (Lenti84 / SurfGargano) | clear separation from the upstream 1.x releases |
+| D4 | STM32 = pure real-time actuator, ESP32 = logic/configuration/integration | one source of truth per concern |
+| D5 | New **binary UART protocol** (COBS + CRC16, sequence numbers, request/response + events), shared header for both sides | see protocol specification |
+| D6 | STM32 and ESP32 are always updated **together** (ESP flashes the STM via ROM bootloader); no compatibility with the 1.x text protocol | avoids transition code |
+| D7 | Integration: **MQTT / Home Assistant first**; KNX will be discussed separately later as its own adapter | HA is almost there, fastest benefit |
+| D8 | Primary target hardware **C2 + STM32F411**; F401 and C1 remain possible via build environments but are not primarily tested | hardware at hand |
+| D9 | Code, comments, documentation, commit messages and issues are written in **English** | public repository |
 
-Offen / später:
+Open / later:
 
-- **KNX**: Weg noch offen (KNX-IP über ESP32 ohne ETS-Produktdatenbank vs.
-  TP-UART-Transceiver mit ETS-Applikation, z. B. im Stil von OpenKNX).
-  Die frühere Bastellösung (TP-Wandler an der STM-Debug-UART) wird nicht
-  weiterverfolgt.
-- **Zusatzkondensator 3,3 µF / 50 V am ESP-Connector** (vorhanden auf dem
-  eigenen Board, Zweck unbekannt). Wahrscheinlich entweder Stützkondensator
-  für die 3,3-V-/5-V-Versorgung des WT32-ETH01 (Stromspitzen von WLAN/PHY →
-  Brown-out-Resets) oder RC-Verzögerung am EN-Pin (bekanntes Bootproblem des
-  WT32-ETH01, weil GPIO0 vom LAN8720-Takt belegt ist). **Klären, an welchen
-  Pins er hängt**, und im Hardware-Dokument festhalten.
+- **KNX**: approach still open (KNX-IP from the ESP32 without an ETS product
+  database vs. a TP-UART transceiver with an ETS application, e.g. based on the
+  OpenKNX tooling). The earlier prototype (TP converter on the STM debug UART)
+  will not be continued.
+- **Additional 3.3 µF / 50 V capacitor on the ESP connector** (present on the
+  owner's board, purpose unknown). Most likely either a bulk capacitor for the
+  WT32-ETH01 supply (current spikes from WiFi/PHY → brown-out resets) or an RC
+  delay on the EN pin (known WT32-ETH01 boot issue, because GPIO0 is driven by
+  the LAN8720 clock). **Find out which pins it is connected to** and document it
+  in the hardware documentation.
 
 ---
 
-## 3. Zielstruktur des Repos
+## 3. Target repository layout
 
 ```
 common/
-  protocol/            gemeinsamer Protokoll-Code (C99, ohne Arduino-Abhängigkeit)
-    vdm_link.h         Nachrichten-IDs, Strukturen, Fehlercodes
-    vdm_cobs.[ch]      COBS-Encode/Decode
+  protocol/            shared protocol code (C99, no Arduino dependency)
+    vdm_link.h         message ids, structures, error codes
+    vdm_cobs.[ch]      COBS encode/decode
     vdm_crc16.[ch]     CRC-16/CCITT-FALSE
-    vdm_codec.[ch]     (De)Serialisierung der Nachrichten, Little-Endian, feldweise
+    vdm_codec.[ch]     message (de)serialization, little-endian, field by field
 firmware/
-  stm32/               neue STM32-Firmware (PlatformIO)
-    src/hal/           Pins, Timer, ADC, Impulszähler, EEPROM, 1-Wire (einzige Stelle mit Arduino/HAL)
-    src/motor/         MotorChannel (Zustandsautomat), ValveManager, Kalibrierung – hardwarefrei
-    src/sensors/       1-Wire-Scheduler (nicht blockierend), Sensorliste nach ROM-ID
-    src/link/          Protokoll-Server
-    src/storage/       EEPROM-Records mit Version + CRC
-    test/              Unity-Tests (env:native)
-  esp32/               neue ESP32-Firmware (PlatformIO)
-    src/core/          Datenmodell (Mutex-geschützt), Event-Bus
-    src/link/          Protokoll-Client, STM32-Update über ROM-Bootloader
-    src/config/        versionierte Konfiguration (JSON in LittleFS) + Migrationen
-    src/control/       PI-Regler (monotone Zeitbasis)
-    src/adapters/      web (REST + WebSocket), mqtt_ha, später knx
+  stm32/               new STM32 firmware (PlatformIO)
+    src/hal/           pins, timers, ADC, pulse counter, EEPROM, 1-Wire (only place using Arduino/HAL)
+    src/motor/         MotorChannel (state machine), ValveManager, calibration – hardware independent
+    src/sensors/       non-blocking 1-Wire scheduler, sensor list keyed by ROM id
+    src/link/          protocol server
+    src/storage/       EEPROM records with version + CRC
+    test/              Unity tests (env:native)
+  esp32/               new ESP32 firmware (PlatformIO)
+    src/core/          data model (mutex protected), event bus
+    src/link/          protocol client, STM32 update via ROM bootloader
+    src/config/        versioned configuration (JSON on LittleFS) + migrations
+    src/control/       PI controller (monotonic time base)
+    src/adapters/      web (REST + WebSocket), mqtt_ha, later knx
     test/
-  webui/               Web-Oberfläche mit reproduzierbarem Build (ohne mktfs.exe)
+  webui/               web UI with a reproducible build (no mktfs.exe)
 docs/
-  protocol/            Protokoll-Spezifikation
-  refactoring/         dieses Dokument
-software_stm32/, software_esp32/   Altbestand (v1.4.x), wird nach Ablösung entfernt
+  protocol/            protocol specification
+  refactoring/         this document
+software_stm32/, software_esp32/   legacy code (v1.4.x), removed once replaced
 ```
 
-Release-Binaries (`releases/`, `*.bin`) gehören nicht ins Repo, sondern an
-GitHub-Releases (CI baut sie).
+Release binaries (`releases/`, `*.bin`) do not belong in the repository; they
+are attached to GitHub releases (built by CI).
 
 ---
 
-## 4. Phasen
+## 4. Phases
 
-### Phase 0 – Fundament
-- Verzeichnisstruktur, `.gitignore`, `.editorconfig`, clang-format.
-- Protokoll-Spezifikation (dieses Paket) → Review → `common/protocol` implementieren.
-- Host-Tests (PlatformIO `env:native` + Unity) für COBS, CRC, Codec.
-- GitHub Actions: Builds für STM32 (F411/F401) und ESP32, Host-Tests.
+### Phase 0 – Foundation
+- Directory layout, `.gitignore`, `.editorconfig`, clang-format.
+- Protocol specification (this package) → review → implement `common/protocol`.
+- Host tests (PlatformIO `env:native` + Unity) for COBS, CRC, codec.
+- GitHub Actions: builds for STM32 (F411/F401) and ESP32, host tests.
 
-### Phase 1 – STM32-Firmware (kritischster Teil)
-- HAL-Schicht; definierte Pin-Zustände direkt nach Reset (Motoren aus, PSU aus).
-- `MotorChannel`-Zustandsautomat mit `tick()`, ISRs liefern nur Rohdaten
-  (Impulszähler, Stromwerte) über atomare/volatile Übergabe.
-- Positionsführung über gezählte Impulse, getrennte Faktoren für Auf/Zu,
-  Totzone berücksichtigt, Fixed-Point statt Ganzzahl-Scaler.
-- Robuste Endstop-/Unterstrom-Erkennung (konsekutive Zähler, Plausibilitätsgrenzen).
-- Kalibrierdaten + letzte Position persistent (EEPROM-Record, Version + CRC,
-  schreibschonend). Nach Boot: Referenzfahrt statt komplettem Neulernen.
-- Nicht blockierender 1-Wire-Scheduler, Sensoren nur über ROM-ID.
-- IWDG, BOR-Level, Reset-Ursache, Fehlerzähler.
-- Protokoll-Server.
-- Tests auf dem Host für Zustandsautomat, Kalibrierauswertung, Storage.
-- **Hardwaretest am eigenen Board** (Daniel).
+### Phase 1 – STM32 firmware (most critical part)
+- HAL layer; defined pin states immediately after reset (motors off, PSU off).
+- `MotorChannel` state machine with `tick()`; ISRs only deliver raw data
+  (pulse counter, current samples) via atomic/volatile hand-over.
+- Position tracking from counted pulses, separate factors for opening/closing,
+  dead zone taken into account, fixed point instead of an integer scaler.
+- Robust endstop/undercurrent detection (consecutive counters, plausibility limits).
+- Calibration data + last position persisted (EEPROM record, version + CRC,
+  wear-friendly). After boot: reference run instead of a full re-learn.
+- Non-blocking 1-Wire scheduler, sensors addressed only by ROM id.
+- IWDG, BOR level, reset cause, error counters.
+- Protocol server.
+- Host tests for the state machine, calibration evaluation, storage.
+- **Hardware test on the owner's board.**
 
-### Phase 2 – ESP32-Kern
-- FreeRTOS-Tasks mit klaren Zuständigkeiten statt TaskManagerIO/`yieldTask`.
-- Datenmodell + Event-Bus, Protokoll-Client mit Retry/Timeout/Resync.
-- Versionierte Konfiguration mit Migration.
-- STM32-Update über ROM-Bootloader (BOOT0/NRST von ESP aus, wie bisher).
-- REST-API + WebSocket, echte Authentifizierung.
-- PI-Regler mit monotoner Zeitbasis, sauberem Anti-Windup, Staleness-Check.
-- Watchdogs an.
+### Phase 2 – ESP32 core
+- FreeRTOS tasks with clear responsibilities instead of TaskManagerIO/`yieldTask`.
+- Data model + event bus, protocol client with retry/timeout/resync.
+- Versioned configuration with migration.
+- STM32 update via ROM bootloader (BOOT0/NRST driven by the ESP, as today).
+- REST API + WebSocket, real authentication.
+- PI controller with monotonic time base, proper anti-windup, staleness check.
+- Watchdogs enabled.
 
 ### Phase 3 – MQTT / Home Assistant
-- LWT + Birth, `availability_topic`, Client-ID aus MAC.
-- `unique_id` aus MAC + Kanal (stabil bei Umbenennung).
-- Discovery bei Verbindung und bei `homeassistant/status = online`, nicht blockierend.
-- Pro Ventil: `valve` (echte Position), `climate` (wenn PI aktiv), `sensor`
-  (Strom, Temperaturen, Zähler als `total_increasing`), `button` (Kalibrieren),
-  `binary_sensor` (Fehler), `number` mit min/max/step.
-- JSON-Payloads + `value_template`; keine Format-Varianten mehr.
+- LWT + birth message, `availability_topic`, client id derived from MAC.
+- `unique_id` from MAC + channel (stable across renames).
+- Discovery on connect and on `homeassistant/status = online`, non-blocking.
+- Per valve: `valve` (real position), `climate` (if PI control is active),
+  `sensor` (current, temperatures, counters as `total_increasing`), `button`
+  (calibrate), `binary_sensor` (fault), `number` with min/max/step.
+- JSON payloads + `value_template`; no more format variants.
 
-### Phase 4 – Web-UI
-- Neu, klein, gegen die REST/WebSocket-API; Build-Schritt in PlatformIO integriert.
+### Phase 4 – Web UI
+- New, small, built against the REST/WebSocket API; build step integrated into PlatformIO.
 
-### Phase 5 – KNX (nach gesonderter Besprechung)
-- Als Adapter am Datenmodell (DPT 5.001 Stellgröße, DPT 9.001 Temperatur,
-  Status/Fehler).
+### Phase 5 – KNX (after a separate discussion)
+- As an adapter on the data model (DPT 5.001 valve position, DPT 9.001
+  temperature, status/fault).
 
 ---
 
-## 5. Test- und Abnahmekriterien (Auszug)
+## 5. Test and acceptance criteria (excerpt)
 
-- 72 h Dauerlauf mit zufälligen Sollwerten: Positionsfehler nach Referenzfahrt < 2 %.
-- Neustart des STM32: kein Neulernen, nur Referenzfahrt; Positionen korrekt.
-- Abziehen/Anstecken eines Ventils: Erkennung, Fehlermeldung, Wiederaufnahme.
-- UART gestört (Bytes verworfen/verfälscht): keine falsche Aktion, Resync < 1 s.
-- ESP32-Neustart: Ventile behalten Position, HA zeigt kurz „nicht verfügbar“.
-- Home Assistant: alle Entitäten haben Daten, alle Befehle wirken.
+- 72 h endurance run with random targets: position error after a reference run < 2 %.
+- STM32 restart: no re-learn, only a reference run; positions correct.
+- Unplugging/replugging a valve: detected, fault reported, operation resumes.
+- Disturbed UART (dropped/corrupted bytes): no wrong action, resync < 1 s.
+- ESP32 restart: valves keep their position, HA briefly shows "unavailable".
+- Home Assistant: every entity has data, every command takes effect.

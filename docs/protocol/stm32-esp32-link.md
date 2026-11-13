@@ -1,55 +1,54 @@
-# VdMot Link – Protokoll zwischen ESP32 und STM32
+# VdMot Link – ESP32 ⇄ STM32 protocol
 
-Version: **1** (Entwurf) · Stand: 2026-11-13
+Version: **1** (draft) · Date: 2026-11-13
 
-Dieses Dokument beschreibt das Protokoll auf der UART-Verbindung zwischen
-ESP32 (WT32-ETH01) und STM32. Es ersetzt das Textprotokoll der Firmware 1.x
-(`stgtp`, `gvlvd`, …). Eine Kompatibilität zu 1.x besteht nicht.
-
----
-
-## 1. Rollen und Grundsätze
-
-- **ESP32 = Master.** Nur der ESP32 sendet Requests. Der STM32 beantwortet jeden
-  Request mit genau einer Response.
-- **STM32 meldet Änderungen selbst.** Zustandsänderungen schickt der STM32 als
-  **Event**, ohne Aufforderung (z. B. „Ventil 3 hat Ziel erreicht“, „neue
-  Temperaturwerte“). Polling dient nur noch als Sicherheitsnetz.
-- **Der STM32 entscheidet nichts.** Er hält keine Zuordnung Sensor→Ventil und
-  keine Namen. Er kennt Kanäle 0…11 und 1-Wire-Sensoren über ihre 64-Bit-ROM-ID.
-- **Jeder Request ist entweder idempotent oder gegen Wiederholung geschützt**
-  (siehe 4.3), damit Retries gefahrlos sind.
-- **Alle Mehrbyte-Werte sind Little-Endian.** Serialisiert wird feldweise, nicht
-  per `memcpy` von C-Structs (keine Abhängigkeit von Padding/Compiler).
+This document specifies the protocol on the UART link between the ESP32
+(WT32-ETH01) and the STM32. It replaces the text protocol of firmware 1.x
+(`stgtp`, `gvlvd`, …). There is no compatibility with 1.x.
 
 ---
 
-## 2. Physikalische Schicht
+## 1. Roles and principles
 
-| Parameter | Wert |
+- **ESP32 = master.** Only the ESP32 sends requests. The STM32 answers every
+  request with exactly one response.
+- **The STM32 reports changes on its own.** State changes are sent as
+  **events** without being asked (e.g. "valve 3 reached its target", "new
+  temperature readings"). Polling is only a safety net.
+- **The STM32 makes no decisions.** It holds no sensor→valve mapping and no
+  names. It knows channels 0…11 and 1-Wire sensors by their 64-bit ROM id.
+- **Every request is either idempotent or protected against repetition**
+  (see 4.3), so retries are safe.
+- **All multi-byte values are little-endian.** Serialization is done field by
+  field, never by `memcpy` of C structs (no dependency on padding/compiler).
+
+---
+
+## 2. Physical layer
+
+| Parameter | Value |
 |---|---|
 | STM32 | USART1, PA9 (TX) / PA10 (RX) |
 | ESP32 | `Serial2`, GPIO17 (TX) / GPIO5 (RX) |
-| Format | 8N1, kein Handshake |
-| Baudrate | 115200 (Standard); später ggf. 460800 per `SET_LINK` – nicht Teil von v1 |
-| Reset / Boot | ESP32 steuert STM32-NRST (GPIO15) und BOOT0 (GPIO14), wie bisher |
+| Format | 8N1, no flow control |
+| Baud rate | 115200 (default); possibly 460800 later via `SET_LINK` – not part of v1 |
+| Reset / boot | The ESP32 drives the STM32's NRST (GPIO15) and BOOT0 (GPIO14), as today |
 
-Die Firmware-Aktualisierung des STM32 läuft weiterhin über den **ROM-Bootloader**
-(AN3155) auf derselben UART: Der ESP32 setzt BOOT0, pulst NRST und spricht dann
-das ST-Bootloader-Protokoll. Das 3-Sekunden-Fenster mit „DEADBEEF“ der Firmware
-1.x entfällt.
+The STM32 firmware is still updated via the **ROM bootloader** (AN3155) on the
+same UART: the ESP32 asserts BOOT0, pulses NRST and then speaks the ST
+bootloader protocol. The 3-second "DEADBEEF" window of firmware 1.x is dropped.
 
 ---
 
-## 3. Rahmen (Framing)
+## 3. Framing
 
-### 3.1 Aufbau
+### 3.1 Layout
 
-Auf der Leitung wird jeder Rahmen **COBS-kodiert** und mit einem
-**`0x00`-Byte abgeschlossen**. `0x00` kommt im kodierten Inhalt nie vor, so dass
-sich der Empfänger nach jedem Fehler beim nächsten `0x00` neu synchronisiert.
+On the wire every frame is **COBS encoded** and **terminated by a `0x00` byte**.
+`0x00` never occurs inside the encoded content, so after any error the receiver
+resynchronizes at the next `0x00`.
 
-Dekodierter Inhalt:
+Decoded content:
 
 ```
  0        1        2        3        4 … 4+n-1     4+n   4+n+1
@@ -58,375 +57,373 @@ Dekodierter Inhalt:
 +--------+--------+--------+--------+-------------+------+------+
 ```
 
-| Feld | Größe | Bedeutung |
+| Field | Size | Meaning |
 |---|---|---|
-| `ver` | u8 | Protokollversion, aktuell `1`. Rahmen mit anderer Version werden verworfen (Zähler `rx_bad_version`). |
-| `kind` | u8 | `0x01` REQUEST, `0x02` RESPONSE, `0x03` EVENT. Andere Werte: verwerfen. |
-| `seq` | u8 | REQUEST: vom ESP vergeben (1…255, `0` ist reserviert). RESPONSE: Kopie aus dem Request. EVENT: eigener Zähler des STM32 (1…255, umlaufend). |
-| `msg` | u8 | Nachrichten-ID (Kapitel 5/6). Eine RESPONSE trägt dieselbe ID wie ihr Request. |
-| `payload` | 0…240 | nachrichtenspezifisch |
-| `crc` | u16 | CRC-16/CCITT-FALSE (Poly `0x1021`, Init `0xFFFF`, keine Reflexion, kein XorOut) über `ver` … Ende `payload` |
+| `ver` | u8 | Protocol version, currently `1`. Frames with a different version are dropped (counter `rx_bad_version`). |
+| `kind` | u8 | `0x01` REQUEST, `0x02` RESPONSE, `0x03` EVENT. Other values: drop. |
+| `seq` | u8 | REQUEST: assigned by the ESP (1…255, `0` is reserved). RESPONSE: copied from the request. EVENT: the STM32's own counter (1…255, wrapping). |
+| `msg` | u8 | Message id (chapters 5/6). A RESPONSE carries the same id as its request. |
+| `payload` | 0…240 | message specific |
+| `crc` | u16 | CRC-16/CCITT-FALSE (poly `0x1021`, init `0xFFFF`, no reflection, no xorout) over `ver` … end of `payload` |
 
-- Die Payload-Länge ergibt sich aus der dekodierten Rahmenlänge (`len - 6`);
-  ein eigenes Längenfeld gibt es nicht.
-- Maximale dekodierte Rahmenlänge: **246 Byte**, kodiert ≤ 248 Byte inkl. `0x00`.
-- Rahmen kürzer als 6 Byte, länger als 246 Byte, mit COBS- oder CRC-Fehler werden
-  **still verworfen**. Je Fehlerart zählt ein eigener Zähler (siehe `GET_DIAG`).
-  Auf fehlerhafte Rahmen wird **nie** geantwortet, weil `seq` nicht vertrauenswürdig ist.
+- The payload length follows from the decoded frame length (`len - 6`); there
+  is no separate length field.
+- Maximum decoded frame length: **246 bytes**, encoded ≤ 248 bytes including `0x00`.
+- Frames shorter than 6 bytes, longer than 246 bytes, or with a COBS or CRC
+  error are **silently dropped**. Each error type has its own counter (see
+  `GET_DIAG`). Corrupted frames are **never** answered, because their `seq`
+  cannot be trusted.
 
-### 3.2 Empfangspuffer
+### 3.2 Receive buffer
 
-- Jede Seite hält einen Rahmenpuffer von mindestens 256 Byte. Läuft er ohne `0x00`
-  voll, wird bis zum nächsten `0x00` alles verworfen (`rx_overflow`).
-- Der STM32 nimmt UART-Bytes per Interrupt oder DMA in einen Ringpuffer von
-  ≥ 512 Byte auf. Die Auswertung läuft im Hauptloop. Innerhalb eines Loop-Durchlaufs
-  werden **alle** vollständigen Rahmen verarbeitet.
+- Each side keeps a frame buffer of at least 256 bytes. If it fills up without
+  a `0x00`, everything up to the next `0x00` is discarded (`rx_overflow`).
+- The STM32 receives UART bytes by interrupt or DMA into a ring buffer of
+  ≥ 512 bytes. Parsing happens in the main loop. **All** complete frames are
+  processed in each loop pass.
 
 ---
 
-## 4. Ablauf
+## 4. Flow
 
-### 4.1 Request / Response
+### 4.1 Request / response
 
-- Der ESP hat **höchstens einen offenen Request** (Stop-and-Wait). Das reicht bei
-  der geringen Datenmenge und hält beide Seiten einfach.
-- Der STM32 antwortet innerhalb von **20 ms** (Ziel), spätestens nach 50 ms.
-  Aktionen, die länger dauern (Fahren, Kalibrieren, 1-Wire-Suche), werden nur
-  **angenommen**. Ihr Ergebnis kommt später als Event.
-- **Timeout auf ESP-Seite: 100 ms.** Danach wird derselbe Request mit **derselben
-  `seq`** wiederholt, höchstens 3 Mal.
-- Nach 3 erfolglosen Wiederholungen gilt die Verbindung als **gestört**
-  (`LINK_DOWN`):
-  - Der ESP versucht alle 1 s `HELLO`.
-  - Nach 30 s ohne Antwort setzt er den STM32 per NRST hart zurück, höchstens
-    einmal pro 5 min.
-  - Er meldet `LINK_DOWN` an das Datenmodell. Home Assistant zeigt die Ventile dann
-    als „nicht verfügbar“.
+- The ESP has **at most one outstanding request** (stop-and-wait). That is
+  enough for the small data volume and keeps both sides simple.
+- The STM32 answers within **20 ms** (target), at the latest after 50 ms.
+  Actions that take longer (moving, calibrating, 1-Wire search) are only
+  **accepted**. Their result arrives later as an event.
+- **Timeout on the ESP side: 100 ms.** After that the same request is repeated
+  with the **same `seq`**, at most 3 times.
+- After 3 failed retries the link is considered **down** (`LINK_DOWN`):
+  - The ESP tries `HELLO` every 1 s.
+  - After 30 s without an answer it hard-resets the STM32 via NRST, at most
+    once every 5 min.
+  - It reports `LINK_DOWN` to the data model. Home Assistant then shows the
+    valves as "unavailable".
 
-### 4.2 Statuscode jeder Response
+### 4.2 Status code of every response
 
-Das **erste Payload-Byte jeder Response** ist ein Statuscode:
+The **first payload byte of every response** is a status code:
 
-| Code | Name | Bedeutung |
+| Code | Name | Meaning |
 |---|---|---|
-| `0x00` | `OK` | ausgeführt bzw. angenommen |
-| `0x01` | `ERR_UNKNOWN_MSG` | Nachrichten-ID unbekannt |
-| `0x02` | `ERR_BAD_LEN` | Payload-Länge passt nicht |
-| `0x03` | `ERR_RANGE` | Wert außerhalb des gültigen Bereichs; das zweite Byte nennt den Index des ersten ungültigen Felds |
-| `0x04` | `ERR_CHANNEL` | Kanal ungültig oder deaktiviert |
-| `0x05` | `ERR_BUSY` | Ressource belegt (z. B. 1-Wire-Suche läuft bereits) |
-| `0x06` | `ERR_STATE` | im aktuellen Zustand nicht erlaubt (z. B. Ventil nicht kalibriert) |
-| `0x07` | `ERR_STORAGE` | EEPROM-Fehler |
-| `0x08` | `ERR_NOT_READY` | STM32 noch in der Initialisierung (vor `HELLO`) |
-| `0xFF` | `ERR_INTERNAL` | sonstiger Fehler |
+| `0x00` | `OK` | executed or accepted |
+| `0x01` | `ERR_UNKNOWN_MSG` | unknown message id |
+| `0x02` | `ERR_BAD_LEN` | payload length does not match |
+| `0x03` | `ERR_RANGE` | value out of range; the second byte holds the index of the first invalid field |
+| `0x04` | `ERR_CHANNEL` | channel invalid or disabled |
+| `0x05` | `ERR_BUSY` | resource busy (e.g. a 1-Wire search is already running) |
+| `0x06` | `ERR_STATE` | not allowed in the current state (e.g. valve not calibrated) |
+| `0x07` | `ERR_STORAGE` | EEPROM error |
+| `0x08` | `ERR_NOT_READY` | STM32 still initializing (before `HELLO`) |
+| `0xFF` | `ERR_INTERNAL` | any other error |
 
-Die weiteren Payload-Bytes folgen nur bei `OK`, sofern unten nicht anders angegeben.
+The remaining payload bytes follow only with `OK`, unless stated otherwise below.
 
-### 4.3 Schutz vor doppelter Ausführung
+### 4.3 Protection against double execution
 
-Der STM32 merkt sich `seq` und den Antwortrahmen des **letzten** Requests.
-Kommt ein Request mit derselben `seq` und derselben `msg` erneut, wird er **nicht
-noch einmal ausgeführt**: Der STM32 sendet nur die gespeicherte Antwort erneut.
-So startet z. B. ein wiederholtes `CALIBRATE` keine zweite Kalibrierung.
+The STM32 remembers the `seq` and the response frame of the **last** request.
+If a request with the same `seq` and the same `msg` arrives again, it is **not
+executed again**: the STM32 only resends the stored response. This way, for
+example, a repeated `CALIBRATE` does not start a second calibration.
 
-Der ESP vergibt `seq` fortlaufend (1…255 umlaufend, `0` wird übersprungen). Nach
-`HELLO` mit gesetztem `reset_seq` vergisst der STM32 die gespeicherte `seq`.
+The ESP assigns `seq` sequentially (1…255 wrapping, `0` is skipped). After a
+`HELLO` with `reset_seq` set, the STM32 forgets the stored `seq`.
 
 ### 4.4 Events
 
-- Events werden **nicht quittiert**. Verlorene Events schaden nicht:
-  - Jedes Event mit Zustandsdaten trägt den **vollständigen** aktuellen Zustand
-    seines Objekts, nie nur die Differenz.
-  - Der ESP fragt zusätzlich alle **10 s** `GET_VALVE_STATES` ab. Das ist das
-    Sicherheitsnetz und gleichzeitig das Lebenszeichen.
-- Über die Event-`seq` erkennt der ESP Lücken (Zähler `evt_lost`). Bei einer Lücke
-  holt er den kompletten Zustand sofort statt erst nach 10 s.
-- Events werden nur gesendet, wenn gerade kein Response-Rahmen läuft. Eine
-  Response hat Vorrang. Beide Richtungen sind voll duplex.
-- Ein Rate-Limit gilt pro Kanal: höchstens 10 `EVT_VALVE` pro Sekunde. Bei
-  schnelleren Änderungen wird nur der jeweils letzte Zustand gesendet.
+- Events are **not acknowledged**. Lost events do no harm:
+  - Every event that carries state contains the **complete** current state of
+    its object, never just a delta.
+  - In addition the ESP requests `GET_VALVE_STATES` every **10 s**. This is the
+    safety net and also serves as a heartbeat.
+- The event `seq` lets the ESP detect gaps (counter `evt_lost`). On a gap it
+  fetches the complete state immediately instead of waiting 10 s.
+- Events are only sent while no response frame is in transmission. A response
+  takes priority. Both directions are full duplex.
+- Rate limit per channel: at most 10 `EVT_VALVE` per second. For faster
+  changes only the latest state is sent.
 
-### 4.5 Start und Handshake
+### 4.5 Startup and handshake
 
-1. Nach dem Reset sendet der STM32 `EVT_BOOT`. Das Event wird alle 1 s wiederholt,
-   bis ein `HELLO` eintrifft.
-2. Der ESP sendet `HELLO`, entweder auf `EVT_BOOT` hin oder beim eigenen Start.
-3. Der ESP prüft in der Antwort:
-   - Ist `proto_version` ≠ 1, wird keine weitere Nachricht gesendet. Der Status
-     wird `INCOMPATIBLE`, die Web-UI bietet das STM32-Update an.
-   - `channel_count`, `hw_rev` und `capabilities` werden ins Datenmodell übernommen.
-4. Der ESP überträgt die Konfiguration:
+1. After reset the STM32 sends `EVT_BOOT`. The event is repeated every 1 s
+   until a `HELLO` arrives.
+2. The ESP sends `HELLO`, either in reaction to `EVT_BOOT` or on its own startup.
+3. The ESP checks the response:
+   - If `proto_version` ≠ 1, no further messages are sent. The status becomes
+     `INCOMPATIBLE`, and the web UI offers the STM32 update.
+   - `channel_count`, `hw_rev` and `capabilities` are copied into the data model.
+4. The ESP transfers the configuration:
    - `SET_SYSTEM_CONFIG`
    - `SET_MOTOR_PARAMS`
    - `SET_CHANNELS`
-   - danach die Sollwerte per `SET_TARGETS`
-5. Danach folgt der Normalbetrieb.
+   - then the targets via `SET_TARGETS`
+5. Normal operation follows.
 
-Bis zum ersten `HELLO` beantwortet der STM32 alle anderen Requests mit
-`ERR_NOT_READY`. Er arbeitet trotzdem mit seiner zuletzt gespeicherten
-Konfiguration weiter (siehe 7).
+Until the first `HELLO` the STM32 answers every other request with
+`ERR_NOT_READY`. It still keeps operating with its last stored configuration
+(see 7).
 
 ---
 
 ## 5. Requests (ESP → STM32)
 
-Bereiche der Nachrichten-IDs:
+Message id ranges:
 
-| Bereich | Inhalt |
+| Range | Content |
 |---|---|
-| `0x01–0x0F` | System |
-| `0x10–0x2F` | Ventile |
-| `0x30–0x3F` | Sensoren |
-| `0x40–0x4F` | Diagnose |
-| `0x80–0xBF` | Events |
+| `0x01–0x0F` | system |
+| `0x10–0x2F` | valves |
+| `0x30–0x3F` | sensors |
+| `0x40–0x4F` | diagnostics |
+| `0x80–0xBF` | events |
 
-Angegeben ist jeweils die Payload. Bei der Antwort ist der Statuscode aus 4.2
-nicht noch einmal aufgeführt.
+Each entry lists the payload. For responses, the status code from 4.2 is not
+repeated.
 
 ### 5.1 System
 
 #### `0x01 HELLO`
 Request:
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
-| `esp_proto_version` | u8 | Protokollversion des ESP |
-| `flags` | u8 | Bit 0 `reset_seq` |
+| `esp_proto_version` | u8 | protocol version of the ESP |
+| `flags` | u8 | bit 0 `reset_seq` |
 
-Antwort:
+Response:
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
 | `proto_version` | u8 | `1` |
-| `fw_major`, `fw_minor`, `fw_patch` | u8 ×3 | Firmware-Version |
-| `fw_build` | u32 | Build-Zeitstempel (Unix) oder CI-Buildnummer |
+| `fw_major`, `fw_minor`, `fw_patch` | u8 ×3 | firmware version |
+| `fw_build` | u32 | build timestamp (Unix) or CI build number |
 | `hw_rev` | u8 | `1` = C1, `2` = C2/C3 |
 | `mcu` | u8 | `1` = F401, `2` = F411 |
-| `mcu_uid` | u8[12] | 96-Bit Unique-ID des STM32 |
-| `channel_count` | u8 | Anzahl Kanäle (12) |
-| `capabilities` | u32 | Bit 0 DS18B20, Bit 1 DS2438, Bit 2 RS485, Bit 3 CAN |
-| `reset_cause` | u8 | `0` unbekannt, `1` Power-on, `2` Pin/NRST, `3` Software, `4` IWDG, `5` Brown-out, `6` Low-power |
-| `boot_count` | u32 | Anzahl Starts (EEPROM) |
-| `config_crc` | u16 | CRC der aktuell aktiven System- und Motor-Konfiguration; der ESP kann damit das erneute Senden überspringen |
+| `mcu_uid` | u8[12] | 96-bit unique id of the STM32 |
+| `channel_count` | u8 | number of channels (12) |
+| `capabilities` | u32 | bit 0 DS18B20, bit 1 DS2438, bit 2 RS485, bit 3 CAN |
+| `reset_cause` | u8 | `0` unknown, `1` power-on, `2` pin/NRST, `3` software, `4` IWDG, `5` brown-out, `6` low-power |
+| `boot_count` | u32 | number of boots (EEPROM) |
+| `config_crc` | u16 | CRC of the active system and motor configuration; lets the ESP skip resending it |
 
 #### `0x02 PING`
-Request: beliebige 0…16 Byte. Antwort: dieselben Bytes zurück. Dient zum Test
-des Links.
+Request: any 0…16 bytes. Response: the same bytes echoed back. Used to test the link.
 
 #### `0x03 RESET`
 Request:
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
-| `magic` | u32 | `0x52535431` („RST1“) |
+| `magic` | u32 | `0x52535431` ("RST1") |
 
-Der STM32 antwortet `OK` und hält alle Motoren an. Er schreibt ausstehende
-EEPROM-Daten und startet danach neu (`NVIC_SystemReset`).
+The STM32 answers `OK` and stops all motors. It writes pending EEPROM data and
+then restarts (`NVIC_SystemReset`).
 
 #### `0x04 SET_SYSTEM_CONFIG`
 
-| Feld | Typ | Bereich | Bedeutung |
+| Field | Type | Range | Meaning |
 |---|---|---|---|
-| `link_timeout_s` | u16 | 0, 10…3600 | Hört der STM32 so lange keinen gültigen Request, gilt der ESP als ausgefallen. `0` = nie. |
-| `failsafe_pos` | u16 | 0…1000, `0xFFFF` | Zielposition (0,1 %) bei ESP-Ausfall. `0xFFFF` = aktuelle Position halten. |
-| `startup_pos` | u16 | 0…1000, `0xFFFF` | Zielposition nach dem Boot, bis der ESP Sollwerte schickt. `0xFFFF` = zuletzt gespeicherte Zielposition. |
-| `sensor_interval_s` | u16 | 5…3600 | Intervall der 1-Wire-Messung |
-| `recal_after_moves` | u16 | 0, 50…10000 | automatische Nachkalibrierung nach so vielen Fahrten. `0` = aus. |
-| `recal_after_days` | u8 | 0, 1…60 | automatische Nachkalibrierung nach so vielen Tagen Laufzeit. `0` = aus. |
+| `link_timeout_s` | u16 | 0, 10…3600 | If the STM32 receives no valid request for this long, the ESP is considered failed. `0` = never. |
+| `failsafe_pos` | u16 | 0…1000, `0xFFFF` | Target position (0.1 %) on ESP failure. `0xFFFF` = hold the current position. |
+| `startup_pos` | u16 | 0…1000, `0xFFFF` | Target position after boot until the ESP sends targets. `0xFFFF` = last stored target. |
+| `sensor_interval_s` | u16 | 5…3600 | 1-Wire measurement interval |
+| `recal_after_moves` | u16 | 0, 50…10000 | Automatic recalibration after this many moves. `0` = off. |
+| `recal_after_days` | u8 | 0, 1…60 | Automatic recalibration after this many days of uptime. `0` = off. |
 
-Wird persistent gespeichert. Antwort: `config_crc` (u16).
+Stored persistently. Response: `config_crc` (u16).
 
 #### `0x05 GET_SYSTEM_CONFIG`
-Antwort: dieselben Felder wie `SET_SYSTEM_CONFIG`.
+Response: the same fields as `SET_SYSTEM_CONFIG`.
 
-### 5.2 Ventile
+### 5.2 Valves
 
-Positionen werden immer in **0,1 % (0…1000)** angegeben: 0 = geschlossen,
-1000 = ganz offen. Kanäle zählen von 0 bis 11. Kanalmasken sind `u16`; Bit n
-steht für Kanal n.
+Positions are always given in **0.1 % (0…1000)**: 0 = closed, 1000 = fully
+open. Channels are numbered 0 to 11. Channel masks are `u16`; bit n stands for
+channel n.
 
 #### `0x10 GET_VALVE_STATES`
-Request: leer. Antwort:
+Request: empty. Response:
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
-| `count` | u8 | Anzahl Kanäle |
-| `count` × `ValveState` | | siehe 5.4 |
+| `count` | u8 | number of channels |
+| `count` × `ValveState` | | see 5.4 |
 
 #### `0x11 SET_TARGETS`
-Request: `count` (u8, 1…12), danach `count` × { `channel` u8, `target` u16 }.
+Request: `count` (u8, 1…12), then `count` × { `channel` u8, `target` u16 }.
 
-- Die Ziele werden übernommen und in die Fahrwarteschlange eingereiht.
-- Ist ein Ziel ungültig, wird **keines** übernommen: Antwort `ERR_RANGE` bzw.
-  `ERR_CHANNEL`, im zweiten Byte der Index des fehlerhaften Eintrags.
-- Ein Ziel gleich der aktuellen Position ist erlaubt und bewirkt nichts.
-- Läuft auf dem Kanal eine Kalibrierung, wird das Ziel gespeichert und danach
-  angefahren.
+- The targets are accepted and queued for movement.
+- If any target is invalid, **none** is accepted: response `ERR_RANGE` or
+  `ERR_CHANNEL`, with the index of the faulty entry in the second byte.
+- A target equal to the current position is allowed and has no effect.
+- If a calibration is running on the channel, the target is stored and
+  approached afterwards.
 
 #### `0x12 CALIBRATE`
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
-| `mask` | u16 | Kanäle, die angelernt werden sollen |
+| `mask` | u16 | channels to calibrate |
 
-Die Kanäle werden nacheinander angelernt (immer nur ein Motor zur Zeit). Die
-Antwort `OK` bedeutet nur „eingeplant“. Das Ergebnis kommt pro Kanal als
+The channels are calibrated one after another (only one motor at a time). The
+response `OK` only means "scheduled". The result arrives per channel as
 `EVT_CALIBRATION`.
 
 #### `0x13 STOP`
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
-| `mask` | u16 | Kanäle, die angehalten werden sollen |
+| `mask` | u16 | channels to stop |
 
-Laufende Fahrt bzw. Kalibrierung wird abgebrochen, wartende Aufträge der Kanäle
-werden verworfen. Eine abgebrochene Fahrt lässt die Position ungenau; der Kanal
-bekommt dann das Flag `POS_UNCERTAIN` (siehe 5.4).
+A running move or calibration is aborted, and pending jobs for these channels
+are discarded. An aborted move leaves the position inaccurate; the channel then
+gets the `POS_UNCERTAIN` flag (see 5.4).
 
 #### `0x14 SET_CHANNELS`
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
-| `enabled_mask` | u16 | Nur Kanäle, deren Bit gesetzt ist, werden gefahren, geprüft und kalibriert |
+| `enabled_mask` | u16 | Only channels whose bit is set are moved, checked and calibrated |
 
-Wird persistent gespeichert.
+Stored persistently.
 
 #### `0x15 DETECT`
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
-| `mask` | u16 | Kanäle, deren Anschluss geprüft wird |
+| `mask` | u16 | channels whose connection is checked |
 
-Prüft per kurzem Testpuls (ohne Positionsänderung), ob ein Motor angeschlossen
-ist. Das Ergebnis kommt als `EVT_VALVE`.
+Checks with a short test pulse (without changing the position) whether a motor
+is connected. The result arrives as `EVT_VALVE`.
 
 #### `0x16 GET_VALVE_DETAIL`
-Request: `channel` (u8). Antwort:
+Request: `channel` (u8). Response:
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
 | `channel` | u8 | |
-| `state` | `ValveState` | siehe 5.4 |
-| `open_counts` | u32 | Impulse für den Hub 0 → 100 % (letzte Kalibrierung) |
-| `close_counts` | u32 | Impulse für den Hub 100 → 0 % |
-| `deadzone_counts` | i32 | `close_counts − open_counts`, mit Vorzeichen |
-| `calib_age_h` | u32 | Stunden seit der letzten erfolgreichen Kalibrierung, `0xFFFFFFFF` = nie |
+| `state` | `ValveState` | see 5.4 |
+| `open_counts` | u32 | pulses for the stroke 0 → 100 % (last calibration) |
+| `close_counts` | u32 | pulses for the stroke 100 → 0 % |
+| `deadzone_counts` | i32 | `close_counts − open_counts`, signed |
+| `calib_age_h` | u32 | hours since the last successful calibration, `0xFFFFFFFF` = never |
 | `moves_since_calib` | u32 | |
 | `moves_total` | u32 | |
-| `mean_current_open_ma10` | u16 | mittlerer Strom beim Öffnen, 0,1 mA |
-| `mean_current_close_ma10` | u16 | mittlerer Strom beim Schließen, 0,1 mA |
-| `peak_current_ma10` | u16 | höchster Strom der letzten Fahrt, 0,1 mA |
-| `last_move_counts` | i32 | gezählte Impulse der letzten Fahrt, mit Vorzeichen |
-| `last_move_ms` | u32 | Dauer der letzten Fahrt |
-| `calib_retries` | u8 | Wiederholungen bei der letzten Kalibrierung |
-| `last_fault` | u8 | letzter Fehlercode (siehe 5.4), bleibt nach Behebung stehen |
+| `mean_current_open_ma10` | u16 | mean current while opening, 0.1 mA |
+| `mean_current_close_ma10` | u16 | mean current while closing, 0.1 mA |
+| `peak_current_ma10` | u16 | peak current of the last move, 0.1 mA |
+| `last_move_counts` | i32 | pulses counted during the last move, signed |
+| `last_move_ms` | u32 | duration of the last move |
+| `calib_retries` | u8 | retries during the last calibration |
+| `last_fault` | u8 | last fault code (see 5.4), kept after the fault is cleared |
 
 #### `0x20 SET_MOTOR_PARAMS` / `0x21 GET_MOTOR_PARAMS`
-Gilt für alle Kanäle gemeinsam. Felder:
+Shared by all channels. Fields:
 
-| Feld | Typ | Bereich | Standard | Bedeutung |
+| Field | Type | Range | Default | Meaning |
 |---|---|---|---|---|
-| `endstop_factor_open` | u8 | 11…50 | 17 | Endanschlag erkannt, wenn der Strom über `mean × factor/10` liegt (Öffnen) |
-| `endstop_factor_close` | u8 | 11…50 | 17 | wie oben, beim Schließen |
-| `endstop_abs_ma` | u16 | 20…300 | 100 | absolute Stromgrenze, die immer einen Endanschlag auslöst |
-| `inrush_blank_ms` | u16 | 50…1000 | 250 | Ausblendung des Anlaufstroms |
-| `opencircuit_ma10` | u16 | 5…100 | 20 | darunter gilt „kein Motor“ (0,1 mA) … |
-| `opencircuit_ms` | u16 | 100…5000 | 500 | … wenn das so lange **ununterbrochen** anliegt |
-| `move_timeout_s` | u16 | 10…600 | 120 | Höchstdauer einer einzelnen Fahrt |
-| `min_stroke_counts` | u16 | 100…60000 | 3000 | Mindestimpulse für einen gültigen Hub |
-| `max_calib_retries` | u8 | 0…5 | 2 | Wiederholungen bei misslungener Kalibrierung |
+| `endstop_factor_open` | u8 | 11…50 | 17 | endstop detected when the current exceeds `mean × factor/10` (opening) |
+| `endstop_factor_close` | u8 | 11…50 | 17 | as above, while closing |
+| `endstop_abs_ma` | u16 | 20…300 | 100 | absolute current limit that always triggers an endstop |
+| `inrush_blank_ms` | u16 | 50…1000 | 250 | blanking time for the inrush current |
+| `opencircuit_ma10` | u16 | 5…100 | 20 | below this current "no motor" is assumed (0.1 mA) … |
+| `opencircuit_ms` | u16 | 100…5000 | 500 | … if it persists this long **without interruption** |
+| `move_timeout_s` | u16 | 10…600 | 120 | maximum duration of a single move |
+| `min_stroke_counts` | u16 | 100…60000 | 3000 | minimum pulses for a valid stroke |
+| `max_calib_retries` | u8 | 0…5 | 2 | retries after a failed calibration |
 
-Bei `SET` werden alle Felder geprüft. Das erste ungültige Feld wird mit
-`ERR_RANGE` und seinem Feldindex gemeldet (0-basiert, in Tabellenreihenfolge);
-dann wird nichts übernommen. Die Werte werden persistent gespeichert. Antwort
-auf `SET`: `config_crc` (u16).
+On `SET` all fields are validated. The first invalid field is reported with
+`ERR_RANGE` and its field index (0-based, in table order); nothing is applied
+in that case. The values are stored persistently. Response to `SET`:
+`config_crc` (u16).
 
-### 5.3 Sensoren (1-Wire)
+### 5.3 Sensors (1-Wire)
 
-Sensoren werden immer über ihre **ROM-ID (u8[8], Bus-Reihenfolge, Byte 0 =
-Familiencode)** angesprochen. Listenpositionen haben keine dauerhafte Bedeutung.
+Sensors are always addressed by their **ROM id (u8[8], bus order, byte 0 =
+family code)**. List positions have no lasting meaning.
 
 #### `0x30 SENSOR_SCAN`
-Request: leer. Startet eine neue Bus-Suche. Antwort `OK` oder `ERR_BUSY`. Das
-Ergebnis kommt als `EVT_SENSOR_SCAN_DONE`.
+Request: empty. Starts a new bus search. Response `OK` or `ERR_BUSY`. The
+result arrives as `EVT_SENSOR_SCAN_DONE`.
 
 #### `0x31 GET_SENSORS`
 Request:
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
-| `offset` | u8 | erste gewünschte Listenposition |
+| `offset` | u8 | first requested list position |
 
-Antwort:
+Response:
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
-| `total` | u8 | Gesamtzahl der Sensoren |
-| `offset` | u8 | wie angefragt |
-| `count` | u8 | Anzahl Einträge in dieser Antwort |
-| `count` × `SensorValue` | | siehe 5.4 |
+| `total` | u8 | total number of sensors |
+| `offset` | u8 | as requested |
+| `count` | u8 | number of entries in this response |
+| `count` × `SensorValue` | | see 5.4 |
 
-Höchstens 12 Einträge pro Antwort (12 × 16 = 192 Byte). Bei mehr Sensoren fragt
-der ESP mit erhöhtem `offset` nach.
+At most 12 entries per response (12 × 16 = 192 bytes). With more sensors the
+ESP asks again with a higher `offset`.
 
-### 5.4 Gemeinsame Strukturen
+### 5.4 Shared structures
 
-#### `ValveState` (10 Byte)
+#### `ValveState` (10 bytes)
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
 | `channel` | u8 | |
-| `mode` | u8 | `0` DISABLED, `1` UNKNOWN (noch nicht geprüft), `2` NOT_CONNECTED, `3` IDLE, `4` OPENING, `5` CLOSING, `6` CALIBRATING, `7` QUEUED (wartet auf Motorfreigabe), `8` FAULT |
-| `flags` | u8 | siehe unten |
-| `fault` | u8 | aktueller Fehler, siehe unten |
-| `actual` | u16 | Ist-Position, 0,1 %; `0xFFFF` = unbekannt |
-| `target` | u16 | Ziel-Position, 0,1 % |
-| `current_ma10` | u16 | Strom: während der Fahrt aktuell, sonst Mittelwert der letzten Fahrt (0,1 mA) |
+| `mode` | u8 | `0` DISABLED, `1` UNKNOWN (not yet checked), `2` NOT_CONNECTED, `3` IDLE, `4` OPENING, `5` CLOSING, `6` CALIBRATING, `7` QUEUED (waiting for the motor driver), `8` FAULT |
+| `flags` | u8 | see below |
+| `fault` | u8 | current fault, see below |
+| `actual` | u16 | actual position, 0.1 %; `0xFFFF` = unknown |
+| `target` | u16 | target position, 0.1 % |
+| `current_ma10` | u16 | current: live while moving, otherwise mean of the last move (0.1 mA) |
 
 `flags`:
 
-| Bit | Name | Bedeutung |
+| Bit | Name | Meaning |
 |---|---|---|
-| 0 | `CALIBRATED` | gültige Kalibrierdaten vorhanden |
-| 1 | `CALIB_PENDING` | Kalibrierung eingeplant |
-| 2 | `POS_UNCERTAIN` | Position nicht sicher (Abbruch, Boot ohne Referenzfahrt) |
-| 3 | `AT_ENDSTOP` | Endanschlag bei der letzten Fahrt erkannt |
-| 4 | `FAILSAFE` | Ziel stammt aus `failsafe_pos` |
+| 0 | `CALIBRATED` | valid calibration data present |
+| 1 | `CALIB_PENDING` | calibration scheduled |
+| 2 | `POS_UNCERTAIN` | position not reliable (aborted move, boot without reference run) |
+| 3 | `AT_ENDSTOP` | endstop detected during the last move |
+| 4 | `FAILSAFE` | target comes from `failsafe_pos` |
 
-Bits 5–7 sind reserviert (0).
+Bits 5–7 are reserved (0).
 
 `fault`:
 
-| Code | Name | Bedeutung |
+| Code | Name | Meaning |
 |---|---|---|
-| `0` | NONE | kein Fehler |
-| `1` | OPEN_CIRCUIT | kein Strom, Motor abgesteckt |
-| `2` | BLOCKED | Endanschlag deutlich vor dem erwarteten Hubende, mehrfach |
-| `3` | TIMEOUT | `move_timeout_s` überschritten |
-| `4` | OVERCURRENT | `endstop_abs_ma` sofort nach der Anlaufausblendung |
-| `5` | CALIB_FAILED | Hub < `min_stroke_counts` nach allen Wiederholungen |
-| `6` | NO_PULSES | Strom fließt, aber es kommen keine Back-EMF-Impulse |
-| `7` | COUNT_MISMATCH | Impulse bei der Referenzfahrt weichen > 15 % ab |
+| `0` | NONE | no fault |
+| `1` | OPEN_CIRCUIT | no current, motor unplugged |
+| `2` | BLOCKED | endstop reached well before the expected end of stroke, repeatedly |
+| `3` | TIMEOUT | `move_timeout_s` exceeded |
+| `4` | OVERCURRENT | `endstop_abs_ma` exceeded right after the inrush blanking |
+| `5` | CALIB_FAILED | stroke < `min_stroke_counts` after all retries |
+| `6` | NO_PULSES | current flows but no back-EMF pulses arrive |
+| `7` | COUNT_MISMATCH | pulses during the reference run differ by > 15 % |
 
-#### `SensorValue` (16 Byte)
+#### `SensorValue` (16 bytes)
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
-| `rom` | u8[8] | ROM-ID |
-| `kind` | u8 | `1` Temperatur (DS18B20), `2` Spannung VAD (DS2438), `3` Spannung VDD (DS2438), `4` Temperatur (DS2438) |
-| `status` | u8 | `0` OK, `1` CRC-Fehler, `2` nicht erreichbar, `3` noch nicht gemessen, `4` außerhalb des Bereichs (z. B. 85 °C-Resetwert) |
-| `age_s` | u16 | Sekunden seit der letzten gültigen Messung, höchstens `0xFFFF` |
-| `value` | i32 | milli-Einheit: m°C bzw. mV |
+| `rom` | u8[8] | ROM id |
+| `kind` | u8 | `1` temperature (DS18B20), `2` voltage VAD (DS2438), `3` voltage VDD (DS2438), `4` temperature (DS2438) |
+| `status` | u8 | `0` OK, `1` CRC error, `2` not reachable, `3` not yet measured, `4` out of range (e.g. the 85 °C reset value) |
+| `age_s` | u16 | seconds since the last valid reading, capped at `0xFFFF` |
+| `value` | i32 | milli-units: m°C or mV |
 
-Ein DS2438 erscheint als bis zu drei Einträge mit derselben ROM-ID und
-unterschiedlichem `kind`.
+A DS2438 shows up as up to three entries with the same ROM id and different `kind`.
 
-### 5.5 Diagnose
+### 5.5 Diagnostics
 
 #### `0x40 GET_DIAG`
-Request: leer. Antwort:
+Request: empty. Response:
 
-| Feld | Typ | Bedeutung |
+| Field | Type | Meaning |
 |---|---|---|
 | `uptime_s` | u32 | |
 | `rx_frames_ok` | u32 | |
@@ -434,60 +431,60 @@ Request: leer. Antwort:
 | `rx_cobs_err` | u16 | |
 | `rx_overflow` | u16 | |
 | `rx_bad_version` | u16 | |
-| `rx_duplicate` | u16 | Wiederholungen, die über 4.3 beantwortet wurden |
-| `uart_hw_err` | u16 | Framing- oder Overrun-Fehler der UART-Hardware |
+| `rx_duplicate` | u16 | repetitions answered via 4.3 |
+| `uart_hw_err` | u16 | framing or overrun errors of the UART hardware |
 | `ow_crc_err` | u16 | |
-| `ow_bus_err` | u16 | Bus-Kurzschluss, kein Presence-Puls |
+| `ow_bus_err` | u16 | bus short circuit, no presence pulse |
 | `eeprom_writes` | u32 | |
 | `eeprom_err` | u16 | |
-| `loop_max_us` | u32 | längster Hauptloop-Durchlauf seit dem Start |
-| `mcu_temp_c10` | i16 | interne Temperatur des STM32, 0,1 °C |
+| `loop_max_us` | u32 | longest main loop pass since boot |
+| `mcu_temp_c10` | i16 | internal STM32 temperature, 0.1 °C |
 
 #### `0x41 CLEAR_DIAG`
-Request: leer. Setzt die Zähler zurück; Uptime und EEPROM-Zähler bleiben.
+Request: empty. Resets the counters; uptime and the EEPROM counters are kept.
 
 ---
 
 ## 6. Events (STM32 → ESP)
 
-| ID | Name | Payload | Wann |
+| Id | Name | Payload | When |
 |---|---|---|---|
-| `0x80` | `EVT_BOOT` | wie die `HELLO`-Antwort ohne Statuscode | nach dem Reset, wiederholt bis `HELLO` |
-| `0x81` | `EVT_VALVE` | `ValveState` | bei jeder Änderung von `mode`, `flags` oder `fault`; bei Fahrtende; während einer Fahrt höchstens alle 500 ms mit aktueller Position |
-| `0x82` | `EVT_CALIBRATION` | `channel` u8, `result` u8 (`0` OK, sonst `fault`-Code), `open_counts` u32, `close_counts` u32, `retries` u8 | Ende einer Kalibrierung |
-| `0x83` | `EVT_SENSORS` | wie die `GET_SENSORS`-Antwort ohne Statuscode | nach jedem Messzyklus; mehrere Events, wenn > 12 Sensoren |
-| `0x84` | `EVT_SENSOR_SCAN_DONE` | `total` u8, `ds18_count` u8, `ds2438_count` u8, `bus_ok` u8 | Ende von `SENSOR_SCAN` |
-| `0x85` | `EVT_LINK_TIMEOUT` | `failsafe_pos` u16 | `link_timeout_s` abgelaufen; gesendet, sobald der ESP wieder antwortet |
-| `0x86` | `EVT_LOG` | `level` u8 (`0` Error, `1` Warn, `2` Info, `3` Debug), `text` (UTF-8, ≤ 200 Byte, ohne Nullterminierung) | Diagnosemeldungen; der ESP leitet sie an Syslog bzw. die Web-UI weiter |
+| `0x80` | `EVT_BOOT` | like the `HELLO` response without status code | after reset, repeated until `HELLO` |
+| `0x81` | `EVT_VALVE` | `ValveState` | on every change of `mode`, `flags` or `fault`; at the end of a move; during a move at most every 500 ms with the current position |
+| `0x82` | `EVT_CALIBRATION` | `channel` u8, `result` u8 (`0` OK, otherwise a `fault` code), `open_counts` u32, `close_counts` u32, `retries` u8 | end of a calibration |
+| `0x83` | `EVT_SENSORS` | like the `GET_SENSORS` response without status code | after every measurement cycle; several events if > 12 sensors |
+| `0x84` | `EVT_SENSOR_SCAN_DONE` | `total` u8, `ds18_count` u8, `ds2438_count` u8, `bus_ok` u8 | end of `SENSOR_SCAN` |
+| `0x85` | `EVT_LINK_TIMEOUT` | `failsafe_pos` u16 | `link_timeout_s` expired; sent as soon as the ESP responds again |
+| `0x86` | `EVT_LOG` | `level` u8 (`0` error, `1` warn, `2` info, `3` debug), `text` (UTF-8, ≤ 200 bytes, not null-terminated) | diagnostic messages; the ESP forwards them to syslog or the web UI |
 
-`EVT_LOG` mit Level Debug wird nur gesendet, wenn der ESP es per
-`SET_SYSTEM_CONFIG` freigibt. Dafür ist ein zusätzliches Feld in v1.1 vorgesehen,
-in v1 werden nur Error, Warn und Info gesendet. Damit entfällt die Debug-UART
-des STM32 im Normalbetrieb.
-
----
-
-## 7. Verhalten des STM32 ohne ESP
-
-- Der STM32 arbeitet mit der zuletzt gespeicherten Konfiguration (System, Motor,
-  Kanäle) auch ohne ESP.
-- Nach dem Boot:
-  1. Jeder freigegebene Kanal mit gültiger Kalibrierung fährt eine
-     **Referenzfahrt** in Richtung geschlossen bis zum Endanschlag.
-  2. Danach fährt er auf `startup_pos`.
-  3. Weicht die Impulszahl der Referenzfahrt vom Erwarteten ab, setzt der STM32
-     `POS_UNCERTAIN` und plant eine Kalibrierung ein.
-- Ist `link_timeout_s` ≠ 0 und kommt so lange kein gültiger Request:
-  - Ist `failsafe_pos` ≠ `0xFFFF`, wird jeder Kanal dorthin gefahren, mit Flag
-    `FAILSAFE`.
-  - Der erste gültige Request danach beendet den Failsafe-Zustand. Die
-    Sollwerte bleiben dabei, bis der ESP neue sendet.
+`EVT_LOG` with level debug is only sent if the ESP enables it via
+`SET_SYSTEM_CONFIG`. An extra field for that is planned for v1.1; v1 only sends
+error, warn and info. This removes the need for the STM32 debug UART in normal
+operation.
 
 ---
 
-## 8. Beispiel
+## 7. STM32 behaviour without the ESP
 
-ESP setzt Kanal 3 auf 45,0 %:
+- The STM32 keeps operating with its last stored configuration (system, motor,
+  channels) even without the ESP.
+- After boot:
+  1. Every enabled channel with valid calibration performs a **reference run**
+     towards closed until the endstop.
+  2. Then it moves to `startup_pos`.
+  3. If the pulse count of the reference run deviates from the expected value,
+     the STM32 sets `POS_UNCERTAIN` and schedules a calibration.
+- If `link_timeout_s` ≠ 0 and no valid request arrives for that long:
+  - If `failsafe_pos` ≠ `0xFFFF`, every channel is moved there, with the
+    `FAILSAFE` flag set.
+  - The first valid request afterwards ends the failsafe state. The targets
+    stay unchanged until the ESP sends new ones.
+
+---
+
+## 8. Example
+
+The ESP sets channel 3 to 45.0 %:
 
 ```
 REQ  ver=1 kind=1 seq=17 msg=0x11  payload: 01 03 C2 01        (count=1, ch=3, target=450)
@@ -498,42 +495,39 @@ EVT  ver=1 kind=3 seq=89 msg=0x81  payload: 03 03 01 00 C1 01 C2 01 CA 00
                                    (ch=3, IDLE, actual=449, target=450, 20.2 mA)
 ```
 
-Auf der Leitung wird jeder Rahmen dekodiert so geschrieben:
-`ver kind seq msg payload… crc_lo crc_hi`. Er wird COBS-kodiert und mit `00`
-abgeschlossen.
+Each decoded frame is written as `ver kind seq msg payload… crc_lo crc_hi`. It
+is COBS encoded and terminated by `00` on the wire.
 
 ---
 
-## 9. Auslastung (Plausibilitätsrechnung)
+## 9. Bandwidth (sanity check)
 
-115200 Baud ≈ 11,5 kB/s.
+115200 baud ≈ 11.5 kB/s.
 
-- Grundlast: `GET_VALVE_STATES` alle 10 s, etwa 140 Byte in beide Richtungen.
-- Sensor-Events alle 30 s mit 30 Sensoren, etwa 500 Byte.
-- `EVT_VALVE` während einer Fahrt alle 500 ms, je etwa 20 Byte.
+- Base load: `GET_VALVE_STATES` every 10 s, about 140 bytes in both directions.
+- Sensor events every 30 s with 30 sensors, about 500 bytes.
+- `EVT_VALVE` every 500 ms during a move, about 20 bytes each.
 
-Zusammen sind das **deutlich unter 1 %** der Kapazität. Die Baudrate muss nicht
-erhöht werden.
-
----
-
-## 10. Umsetzungshinweise
-
-- Gemeinsamer C99-Code unter `common/protocol/` ohne Arduino-Abhängigkeit. Beide
-  Firmwares binden ihn ein, getestet wird er auf dem Host (`env:native`).
-- Encoder und Decoder je Nachricht als Funktionspaar
-  (`vdm_enc_set_targets()`, `vdm_dec_set_targets()`). Der Decoder prüft Länge
-  und Bereiche, nicht der Aufrufer.
-- Auf dem STM32 wird kein dynamischer Speicher verwendet, auf dem ESP32 im
-  Link-Pfad keine `String`s.
-- Testvektoren (Rahmen als Hex) liegen unter `common/protocol/test/vectors/`
-  und werden von beiden Seiten verwendet.
+Together this is **well below 1 %** of the capacity. There is no need to raise
+the baud rate.
 
 ---
 
-## 11. Offene Punkte
+## 10. Implementation notes
 
-- [ ] Baudratenwechsel (`SET_LINK`) – vermutlich unnötig, siehe 9.
-- [ ] Freigabe von `EVT_LOG` Debug (v1.1).
-- [ ] RS485/CAN: bleiben in v1 unbenutzt; ein späterer Ausbau bekommt den
-      eigenen ID-Bereich `0x50–0x5F`.
+- Shared C99 code in `common/protocol/` without Arduino dependency. Both
+  firmwares include it; it is tested on the host (`env:native`).
+- Encoder and decoder per message as a pair of functions
+  (`vdm_enc_set_targets()`, `vdm_dec_set_targets()`). The decoder validates
+  length and ranges, not the caller.
+- No dynamic memory on the STM32, and no `String`s in the link path on the ESP32.
+- Test vectors (frames as hex) live in `common/protocol/test/vectors/` and are
+  used by both sides.
+
+---
+
+## 11. Open points
+
+- [ ] Baud rate change (`SET_LINK`) – probably unnecessary, see 9.
+- [ ] Enabling `EVT_LOG` debug (v1.1).
+- [ ] RS485/CAN: unused in v1; a later extension gets its own id range `0x50–0x5F`.
