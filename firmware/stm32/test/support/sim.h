@@ -23,6 +23,7 @@ namespace sim
 
 struct Valve {
     bool connected = true;
+    bool noise_pulses = false; /* interference pulses while the driver is on, even without motor */
     bool no_pulses = false;    /* motor turns but the back-EMF circuit sees nothing */
     bool endless = false;      /* broken coupling: never reaches an endstop */
     double x = 0.3;            /* mechanical position */
@@ -130,6 +131,9 @@ class Board : public vdm::MotorPort
         }
         Valve &s = v[enabled];
         if (!psu || !s.connected) {
+            if (psu && s.noise_pulses && (now % 3) == 0) {
+                (*pulses)++;
+            }
             return 0;
         }
         int16_t i;

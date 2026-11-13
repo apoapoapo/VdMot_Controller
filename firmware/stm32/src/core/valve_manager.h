@@ -50,6 +50,10 @@ class ValveManager
     static constexpr uint32_t kMuxSettleMs = 100;
     static constexpr uint16_t kMinStep = 5;       /* 0.5 %: smaller moves are skipped */
     static constexpr uint32_t kDetectPulses = 30; /* ~0.2 % of a stroke */
+    /* a detection move only counts if the motor drew at least this current
+     * (0.1 mA, inrush included): an empty channel can see interference
+     * pulses on the back-EMF input */
+    static constexpr uint16_t kDetectMinPeakMa10 = 50;
     static constexpr uint32_t kDetectTimeoutMs = 3000;
     static constexpr uint32_t kRedetectMs = 10UL * 60UL * 1000UL; /* not connected */
     static constexpr uint32_t kFaultRetryMs = 6UL * 60UL * 60UL * 1000UL;

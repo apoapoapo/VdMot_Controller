@@ -50,6 +50,7 @@ bool MotorRun::start(const RunParams &params)
     turn_sum_ = 0;
     turn_cnt_ = 0;
     peak_ = 0;
+    peak_all_ = 0;
     outcome_ = RunOutcome::None;
 
     releaseFence();
@@ -106,6 +107,7 @@ RunResult MotorRun::result() const
         r.mean_ma10 = sum_cnt_ ? static_cast<uint16_t>(sum_abs_ / sum_cnt_) : 0;
     }
     r.peak_ma10 = peak_;
+    r.peak_all_ma10 = peak_all_;
     return r;
 }
 
@@ -173,6 +175,9 @@ void MotorRun::onSample(int16_t current_ma10)
     filtered_x16_ = f;
     uint16_t filt = absMa10(f / 16);
     uint16_t raw = absMa10(current_ma10);
+    if (filt > peak_all_) {
+        peak_all_ = filt;
+    }
 
     if (target_hit_) {
         finish(RunOutcome::TargetReached);

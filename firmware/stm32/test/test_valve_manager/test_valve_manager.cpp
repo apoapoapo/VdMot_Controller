@@ -151,6 +151,20 @@ static void test_not_connected_channel(void)
     TEST_ASSERT_UINT16_WITHIN(6, 300, st(r, 1).actual);
 }
 
+static void test_interference_pulses_without_motor(void)
+{
+    Rig r(0x0003);
+    r.board.v[1].connected = false;
+    r.board.v[1].noise_pulses = true; /* the empty channel sees edges on the pulse input */
+    TEST_ASSERT_TRUE(r.settle());
+    TEST_ASSERT_EQUAL_UINT8(VDM_MODE_NOT_CONNECTED, st(r, 1).mode);
+    TEST_ASSERT_EQUAL_UINT8(VDM_MODE_IDLE, st(r, 0).mode);
+    vdm_evt_calibration_t evt;
+    while (r.vm.popCalibrationEvent(evt)) {
+        TEST_ASSERT_EQUAL_UINT8(0, evt.channel); /* no calibration attempt on channel 1 */
+    }
+}
+
 static void test_short_stroke_fails_calibration(void)
 {
     Rig r;
@@ -349,6 +363,7 @@ int main(void)
     RUN_TEST(test_small_steps_are_skipped);
     RUN_TEST(test_only_one_motor_at_a_time_and_all_channels_served);
     RUN_TEST(test_not_connected_channel);
+    RUN_TEST(test_interference_pulses_without_motor);
     RUN_TEST(test_short_stroke_fails_calibration);
     RUN_TEST(test_obstruction_after_calibration_is_detected);
     RUN_TEST(test_no_pulses_is_a_fault);

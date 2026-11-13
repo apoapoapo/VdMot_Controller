@@ -532,8 +532,12 @@ void LinkClient::onEvent(const vdm_frame_t &f, uint32_t now_ms)
                              c.channel + 1u, static_cast<unsigned long>(c.open_counts),
                              static_cast<unsigned long>(c.close_counts));
             } else {
-                n = snprintf(text, sizeof(text), "valve %u calibration failed (fault %u)",
-                             c.channel + 1u, c.result);
+                static const char *const kFaults[] = {
+                    "none",        "open circuit",     "blocked",   "timeout",
+                    "overcurrent", "stroke too short", "no pulses", "count mismatch"};
+                const char *name = c.result <= VDM_FAULT_LAST ? kFaults[c.result] : "?";
+                n = snprintf(text, sizeof(text), "valve %u calibration failed: %s", c.channel + 1u,
+                             name);
             }
             model_.addLog(now_ms, c.result == VDM_FAULT_NONE ? VDM_LOG_INFO : VDM_LOG_WARN, text,
                           n > 0 ? static_cast<size_t>(n) : 0u);

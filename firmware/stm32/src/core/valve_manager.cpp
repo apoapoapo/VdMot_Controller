@@ -653,6 +653,11 @@ bool ValveManager::finishDetect(const RunResult &r)
     c.want_detect = false;
     bool first = !c.detect_second;
     c.detect_second = false;
+    if (r.outcome == RunOutcome::TargetReached && r.peak_all_ma10 < kDetectMinPeakMa10) {
+        /* pulses without current: interference, no motor */
+        enterNotConnected(job_ch_, run_start_ms_ + r.duration_ms);
+        return true;
+    }
     if (r.outcome == RunOutcome::TargetReached) {
         c.mode = VDM_MODE_IDLE;
         c.fault = VDM_FAULT_NONE;
