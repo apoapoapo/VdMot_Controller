@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "../support/fake_eeprom.h"
+#include "../support/fake_onewire.h"
 #include "../support/sim.h"
 #include "core/controller.h"
 #include "vdm/codec.h"
@@ -69,9 +70,11 @@ struct Rig {
     vdm::MotorRun run{board};
     vdm::ValveManager vm{board, run};
     vdm::Storage storage{eeprom};
+    sim::FakeBus bus;
+    vdm::SensorManager sensors{bus};
     FakeSystem system;
     EspLink esp;
-    vdm::Controller ctl{kInfo, vm, storage, system, esp};
+    vdm::Controller ctl{kInfo, vm, sensors, storage, system, esp};
     uint32_t now = 0;
     uint8_t seq = 1;
 
@@ -79,6 +82,11 @@ struct Rig {
     {
         for (int ch = 1; ch < 12; ch++) {
             board.v[ch].connected = false; /* only channel 0 has a valve */
+        }
+        for (uint32_t i = 0; i < 14; i++) {
+            sim::OwDevice d = sim::makeDevice(vdm::onewire::kFamilyDs18b20, 0x100 + i * 3);
+            d.temp_mc = 20000 + static_cast<int32_t>(i) * 500;
+            bus.devs.push_back(d);
         }
         ctl.begin(now);
     }
@@ -413,6 +421,42 @@ static void test_diag_and_ping(void)
     TEST_ASSERT_EQUAL_UINT32(1, r.diag().rx_frames_ok);
 }
 
+static void test_sensors_events_and_paging(void)
+{
+    sim::FakeEeprom e;
+    Rig r(e);
+    r.hello();
+    r.runMs(32000); /* scan at boot, cycles at 0 s and 30 s */
+    TEST_ASSERT_TRUE(r.count(VDM_KIND_EVENT, VDM_EVT_SENSORS) >= 2);
+
+    std::vector<uint8_t> resp = r.request(VDM_MSG_GET_SENSORS, (const uint8_t[]){0}, 1);
+    vdm_sensors_t s;
+    TEST_ASSERT_EQUAL(VDM_OK, vdm_dec_sensors(&resp[1], resp.size() - 1, &s, nullptr));
+    TEST_ASSERT_EQUAL_UINT8(14, s.total);
+    TEST_ASSERT_EQUAL_UINT8(12, s.count);
+    TEST_ASSERT_EQUAL_UINT8(VDM_SSTAT_OK, s.sensors[0].status);
+    resp = r.request(VDM_MSG_GET_SENSORS, (const uint8_t[]){12}, 1);
+    TEST_ASSERT_EQUAL(VDM_OK, vdm_dec_sensors(&resp[1], resp.size() - 1, &s, nullptr));
+    TEST_ASSERT_EQUAL_UINT8(2, s.count);
+    TEST_ASSERT_EQUAL_UINT8(12, s.offset);
+
+    /* rescan: busy while requested, then an EVT_SENSOR_SCAN_DONE */
+    size_t scans = r.count(VDM_KIND_EVENT, VDM_EVT_SENSOR_SCAN_DONE); /* boot scan */
+    TEST_ASSERT_EQUAL_UINT8(VDM_OK, r.request(VDM_MSG_SENSOR_SCAN).at(0));
+    TEST_ASSERT_EQUAL_UINT8(VDM_ERR_BUSY, r.request(VDM_MSG_SENSOR_SCAN).at(0));
+    r.runMs(500);
+    TEST_ASSERT_EQUAL(scans + 1, r.count(VDM_KIND_EVENT, VDM_EVT_SENSOR_SCAN_DONE));
+    for (const Frame &f : r.esp.frames) {
+        if (f.kind == VDM_KIND_EVENT && f.msg == VDM_EVT_SENSOR_SCAN_DONE) {
+            vdm_evt_scan_done_t d;
+            TEST_ASSERT_EQUAL(VDM_OK,
+                              vdm_dec_evt_scan_done(f.payload.data(), f.payload.size(), &d));
+            TEST_ASSERT_EQUAL_UINT8(14, d.total);
+            TEST_ASSERT_EQUAL_UINT8(1, d.bus_ok);
+        }
+    }
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -425,5 +469,6 @@ int main(void)
     RUN_TEST(test_restart_restores_calibration);
     RUN_TEST(test_reset_flushes_and_resets);
     RUN_TEST(test_diag_and_ping);
+    RUN_TEST(test_sensors_events_and_paging);
     return UNITY_END();
 }

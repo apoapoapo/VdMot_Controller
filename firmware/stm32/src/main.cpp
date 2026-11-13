@@ -33,8 +33,10 @@ board::Motor motor;
 board::Eeprom eeprom;
 board::Link link_port;
 board::System system_port;
+board::OneWireBus onewire_bus;
 vdm::MotorRun motor_run(motor);
 vdm::ValveManager valves(motor, motor_run);
+vdm::SensorManager sensors(onewire_bus);
 vdm::Storage storage(eeprom);
 vdm::BoardInfo info;
 vdm::Controller *controller = nullptr;
@@ -48,6 +50,7 @@ void setup()
 
     pinMode(pinNametoDigitalPin(board::kLed), OUTPUT);
     eeprom.begin();
+    onewire_bus.begin();
     link_port.begin();
 
     info.fw_major = FW_VERSION_MAJOR;
@@ -57,10 +60,10 @@ void setup()
     info.hw_rev = VDM_HW_REV;
     info.mcu = VDM_MCU;
     board::readUid(info.mcu_uid);
-    info.capabilities = 0; /* 1-Wire sensors follow in a later step */
+    info.capabilities = VDM_CAP_DS18B20 | VDM_CAP_DS2438;
     info.reset_cause = reset_cause;
 
-    static vdm::Controller ctl(info, valves, storage, system_port, link_port);
+    static vdm::Controller ctl(info, valves, sensors, storage, system_port, link_port);
     controller = &ctl;
     controller->begin(millis());
 

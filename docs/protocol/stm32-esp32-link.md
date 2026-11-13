@@ -364,6 +364,13 @@ in that case. The values are stored persistently. Response to `SET`:
 Sensors are always addressed by their **ROM id (u8[8], bus order, byte 0 =
 family code)**. List positions have no lasting meaning.
 
+The STM32 searches the bus after boot and on `SENSOR_SCAN`, then measures
+every `sensor_interval_s`: one broadcast Convert T for all devices, then
+each device is read individually. Supported are DS18B20 (family `0x28`) and
+DS2438 (family `0x26`, temperature, VAD and VDD); other families are
+ignored. After an error the last valid value is kept, `status` tells what
+went wrong and `age_s` keeps growing. At most 32 devices are handled.
+
 #### `0x30 SENSOR_SCAN`
 Request: empty. Starts a new bus search. Response `OK` or `ERR_BUSY`. The
 result arrives as `EVT_SENSOR_SCAN_DONE`.

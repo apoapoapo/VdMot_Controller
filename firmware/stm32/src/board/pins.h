@@ -25,6 +25,8 @@ constexpr uint32_t kRevPulse = PA4;   /* back-EMF commutation pulses */
 constexpr uint32_t kCurrent = PA0;    /* motor current, analog */
 constexpr uint32_t kCurrentRef = PA1; /* reference/2, analog */
 
+constexpr PinName kOneWire = PB_10; /* 1-Wire bus, external 3k3 pull-up */
+
 constexpr uint32_t kLinkRx = PA10; /* USART1 to the ESP32 */
 constexpr uint32_t kLinkTx = PA9;
 constexpr uint32_t kI2cScl = PB6;

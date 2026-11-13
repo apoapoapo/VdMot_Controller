@@ -12,6 +12,7 @@
 
 #include "core/link_server.h"
 #include "core/ports.h"
+#include "core/sensor_manager.h"
 #include "core/storage.h"
 #include "core/valve_manager.h"
 #include "vdm/link.h"
@@ -37,8 +38,8 @@ class Controller : public RequestHandler
     static constexpr uint32_t kLazyWriteMs = 10UL * 60UL * 1000UL;
     static constexpr uint32_t kHourMs = 60UL * 60UL * 1000UL;
 
-    Controller(const BoardInfo &info, ValveManager &valves, Storage &storage, SystemPort &system,
-               LinkPort &link_port);
+    Controller(const BoardInfo &info, ValveManager &valves, SensorManager &sensors,
+               Storage &storage, SystemPort &system, LinkPort &link_port);
 
     /* Loads the stored configuration and starts operation. */
     void begin(uint32_t now_ms);
@@ -79,11 +80,13 @@ class Controller : public RequestHandler
     void saveSystem();
     void applyConfig();
     void sendEvents(uint32_t now_ms);
+    bool encodeSensors(uint8_t offset, uint8_t *buf, size_t cap, size_t *len);
     void persist(uint32_t now_ms);
     void endFailsafe();
 
     BoardInfo info_;
     ValveManager &valves_;
+    SensorManager &sensors_;
     Storage &storage_;
     SystemPort &system_;
     LinkServer link_;
@@ -99,7 +102,6 @@ class Controller : public RequestHandler
     uint32_t last_request_ms_ = 0;
     bool failsafe_active_ = false;
     bool link_timeout_evt_ = false;
-    bool scan_done_evt_ = false;
     bool reset_pending_ = false;
 
     uint16_t evt_pending_ = 0;

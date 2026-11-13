@@ -138,15 +138,19 @@ Done:
     non-blocking page writes, power-loss safe.
   - `LinkServer` + `Controller`: all protocol v1 requests, duplicate
     protection, events, boot handshake, failsafe, lazy persistence.
+  - `SensorManager`: non-blocking 1-Wire measurement (at most ~14 ms bus
+    time per main-loop pass), ROM search, broadcast Convert T, DS18B20 and
+    DS2438 (temperature, VAD, VDD), CRC checks, last value kept on errors.
 - `src/board`: pins (C1/C2), motor driver, 1 kHz sampling (TIM11) and pulse
-  interrupt at equal priority, 24LC64 EEPROM, USART1 with 512-byte buffers,
-  IWDG (2 s), reset cause, MCU UID.
-- 49 host tests with a valve simulator (asymmetric strokes, coasting,
-  obstruction, disconnected motor, missing pulses, endless motor), including
-  150 random moves without drift and end-to-end protocol tests.
+  interrupt at equal priority, 24LC64 EEPROM, bit-banged 1-Wire master on
+  PB10, USART1 with 512-byte buffers, IWDG (2 s), reset cause, MCU UID.
+- 57 host tests with a valve simulator (asymmetric strokes, coasting,
+  obstruction, disconnected motor, missing pulses, endless motor) and a
+  bit-level 1-Wire bus simulator, including 150 random moves without drift
+  and end-to-end protocol tests.
 
 Open:
-- 1-Wire sensors (non-blocking scheduler, sensors by ROM id).
+- DS2482 1-Wire bridge (optional on the board), not supported yet.
 - BOR level (option bytes), UART error counters, MCU temperature.
 - **Hardware test on the owner's board** (flash via the ESP32 once phase 2
   provides the update path, or via USB DFU / ST-Link).

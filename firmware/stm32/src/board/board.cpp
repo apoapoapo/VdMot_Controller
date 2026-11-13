@@ -152,6 +152,86 @@ bool Eeprom::busy()
 }
 
 /* ---------------------------------------------------------------------- */
+/* 1-Wire                                                                  */
+/* ---------------------------------------------------------------------- */
+
+namespace
+{
+
+inline void owLow()
+{
+    digitalWriteFast(kOneWire, LOW);
+}
+
+inline void owRelease()
+{
+    digitalWriteFast(kOneWire, HIGH); /* open drain: the pull-up takes over */
+}
+
+inline bool owRead()
+{
+    return digitalReadFast(kOneWire) != 0;
+}
+
+} // namespace
+
+void OneWireBus::begin()
+{
+    owRelease();
+    pinMode(pinNametoDigitalPin(kOneWire), OUTPUT_OPEN_DRAIN);
+}
+
+vdm::OneWirePort::Reset OneWireBus::reset()
+{
+    /* the line must be high before a reset, otherwise it is shorted */
+    for (int i = 0; i < 125 && !owRead(); i++) {
+        delayMicroseconds(2);
+    }
+    if (!owRead()) {
+        return Reset::Short;
+    }
+    owLow();
+    delayMicroseconds(480);
+    noInterrupts();
+    owRelease();
+    delayMicroseconds(70);
+    bool presence = !owRead();
+    interrupts();
+    delayMicroseconds(410);
+    return presence ? Reset::Presence : Reset::NoPresence;
+}
+
+void OneWireBus::writeBit(bool bit)
+{
+    noInterrupts();
+    owLow();
+    if (bit) {
+        delayMicroseconds(6);
+        owRelease();
+        interrupts();
+        delayMicroseconds(64);
+    } else {
+        delayMicroseconds(60);
+        owRelease();
+        interrupts();
+        delayMicroseconds(10);
+    }
+}
+
+bool OneWireBus::readBit()
+{
+    noInterrupts();
+    owLow();
+    delayMicroseconds(6);
+    owRelease();
+    delayMicroseconds(9);
+    bool r = owRead();
+    interrupts();
+    delayMicroseconds(55);
+    return r;
+}
+
+/* ---------------------------------------------------------------------- */
 /* Link                                                                    */
 /* ---------------------------------------------------------------------- */
 

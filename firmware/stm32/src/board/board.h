@@ -6,6 +6,7 @@
 #pragma once
 
 #include "core/motor_run.h"
+#include "core/onewire.h"
 #include "core/ports.h"
 
 namespace board
@@ -35,6 +36,16 @@ class Eeprom : public vdm::EepromPort
     bool read(uint16_t addr, uint8_t *buf, size_t len) override;
     bool writePage(uint16_t addr, const uint8_t *buf, size_t len) override;
     bool busy() override;
+};
+
+/* Bit-banged 1-Wire master (standard speed, Maxim AN126 timing). */
+class OneWireBus : public vdm::OneWirePort
+{
+  public:
+    void begin();
+    Reset reset() override;
+    void writeBit(bool bit) override;
+    bool readBit() override;
 };
 
 class Link : public vdm::LinkPort

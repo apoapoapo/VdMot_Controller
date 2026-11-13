@@ -10,10 +10,10 @@
 namespace vdm
 {
 
-Controller::Controller(const BoardInfo &info, ValveManager &valves, Storage &storage,
-                       SystemPort &system, LinkPort &link_port)
-    : info_(info), valves_(valves), storage_(storage), system_(system), link_(link_port, *this),
-      sys_(vdm_system_config_default), motor_(vdm_motor_params_default)
+Controller::Controller(const BoardInfo &info, ValveManager &valves, SensorManager &sensors,
+                       Storage &storage, SystemPort &system, LinkPort &link_port)
+    : info_(info), valves_(valves), sensors_(sensors), storage_(storage), system_(system),
+      link_(link_port, *this), sys_(vdm_system_config_default), motor_(vdm_motor_params_default)
 {
 }
 
@@ -73,6 +73,19 @@ void Controller::applyConfig()
 {
     valves_.setMotorParams(motor_);
     valves_.setRecalibration(sys_.recal_after_moves, sys_.recal_after_days);
+    sensors_.setInterval(sys_.sensor_interval_s);
+}
+
+bool Controller::encodeSensors(uint8_t offset, uint8_t *buf, size_t cap, size_t *len)
+{
+    vdm_sensors_t s{};
+    s.total = sensors_.entryCount();
+    s.offset = offset;
+    while (s.count < VDM_SENSORS_PER_MSG &&
+           sensors_.entry(static_cast<uint8_t>(offset + s.count), now_ms_, s.sensors[s.count])) {
+        s.count++;
+    }
+    return vdm_enc_sensors(&s, buf, cap, len);
 }
 
 void Controller::saveSystem()
@@ -139,6 +152,7 @@ void Controller::tick(uint32_t now_ms)
     }
 
     valves_.tick(now_ms);
+    sensors_.tick(now_ms);
     storage_.tick();
     sendEvents(now_ms);
     persist(now_ms);
@@ -160,6 +174,9 @@ void Controller::sendEvents(uint32_t now_ms)
         }
         /* keep collecting changes, they are sent after the handshake */
         evt_pending_ |= valves_.takeChanged();
+        vdm_evt_scan_done_t ignored;
+        sensors_.takeScanDone(ignored);
+        sensors_.takeCycleDone();
         return;
     }
 
@@ -170,12 +187,17 @@ void Controller::sendEvents(uint32_t now_ms)
         }
     }
 
-    if (scan_done_evt_) {
-        scan_done_evt_ = false;
-        /* 1-Wire support follows in a later step: report an empty bus */
-        vdm_evt_scan_done_t s{0, 0, 0, 0};
-        if (vdm_enc_evt_scan_done(&s, buf, sizeof(buf), &n)) {
-            link_.sendEvent(VDM_EVT_SENSOR_SCAN_DONE, buf, n);
+    vdm_evt_scan_done_t scan;
+    if (sensors_.takeScanDone(scan) && vdm_enc_evt_scan_done(&scan, buf, sizeof(buf), &n)) {
+        link_.sendEvent(VDM_EVT_SENSOR_SCAN_DONE, buf, n);
+    }
+    if (sensors_.takeCycleDone()) {
+        uint8_t total = sensors_.entryCount();
+        for (uint16_t off = 0; off < total;
+             off = static_cast<uint16_t>(off + VDM_SENSORS_PER_MSG)) {
+            if (encodeSensors(static_cast<uint8_t>(off), buf, sizeof(buf), &n)) {
+                link_.sendEvent(VDM_EVT_SENSORS, buf, n);
+            }
         }
     }
 
@@ -450,7 +472,9 @@ size_t Controller::handleRequest(uint8_t msg, const uint8_t *p, size_t len, uint
         if (len != 0) {
             return error(resp, cap, VDM_ERR_BAD_LEN);
         }
-        scan_done_evt_ = true;
+        if (!sensors_.startScan()) {
+            return error(resp, cap, VDM_ERR_BUSY);
+        }
         return ok(resp, cap);
 
     case VDM_MSG_GET_SENSORS: {
@@ -459,9 +483,9 @@ size_t Controller::handleRequest(uint8_t msg, const uint8_t *p, size_t len, uint
         if (st != VDM_OK) {
             return error(resp, cap, st);
         }
-        vdm_sensors_t s{};
-        s.offset = offset;
-        vdm_enc_sensors(&s, body, sizeof(body), &n);
+        if (!encodeSensors(offset, body, sizeof(body), &n)) {
+            return error(resp, cap, VDM_ERR_INTERNAL);
+        }
         return ok(resp, cap, body, n);
     }
 
@@ -480,6 +504,8 @@ size_t Controller::handleRequest(uint8_t msg, const uint8_t *p, size_t len, uint
         d.rx_bad_version = rx.bad_version;
         d.rx_duplicate = link_.duplicates();
         d.uart_hw_err = pd.uart_hw_err;
+        d.ow_crc_err = sensors_.crcErrors();
+        d.ow_bus_err = sensors_.busErrors();
         d.eeprom_writes = storage_.writes();
         d.eeprom_err = storage_.errors();
         d.loop_max_us = pd.loop_max_us;
@@ -493,6 +519,7 @@ size_t Controller::handleRequest(uint8_t msg, const uint8_t *p, size_t len, uint
             return error(resp, cap, VDM_ERR_BAD_LEN);
         }
         link_.clearStats();
+        sensors_.clearStats();
         system_.clearDiag();
         return ok(resp, cap);
 
