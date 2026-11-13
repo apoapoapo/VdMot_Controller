@@ -20,5 +20,7 @@
 - STM32 firmware: `cd firmware/stm32 && pio run` (envs `f411_c2`, `f401_c2`)
 - STM32 core host tests (valve simulator): `cd firmware/stm32 && pio test -e native`
 - ESP32 firmware: `cd firmware/esp32 && pio run` (env `wt32_eth01`)
+- ESP32 core host tests (incl. integration test against the STM32 core):
+  `cd firmware/esp32 && pio test -e native`
 - Formatting: `clang-format` with the repository's `.clang-format`, applied to
   `common/` and `firmware/` only; CI checks it.

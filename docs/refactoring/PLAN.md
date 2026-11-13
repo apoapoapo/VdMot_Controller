@@ -156,13 +156,28 @@ Open:
   provides the update path, or via USB DFU / ST-Link).
 
 ### Phase 2 – ESP32 core
-- FreeRTOS tasks with clear responsibilities instead of TaskManagerIO/`yieldTask`.
-- Data model + event bus, protocol client with retry/timeout/resync.
-- Versioned configuration with migration.
-- STM32 update via ROM bootloader (BOOT0/NRST driven by the ESP, as today).
-- REST API + WebSocket, real authentication.
-- PI controller with monotonic time base, proper anti-windup, staleness check.
-- Watchdogs enabled.
+
+Done (2a, bring-up for the first hardware test):
+- `src/core` (host tested): `LinkClient` (handshake, stop-and-wait with
+  retries, polling, events, gap detection, user targets resent after an
+  STM32 restart, hard-reset request when the STM32 stays silent) and
+  `Stm32Flasher` (AN3155: BOOT0/NRST, 8E1 sync with baud fallback, chip id,
+  sector erase, 256-byte writes with retry, read-back verification).
+- Integration test: `LinkClient` against the real STM32 core with valve,
+  1-Wire and EEPROM simulators over a wire that drops and corrupts bytes.
+- `src/app`: link task (UART, LinkClient, STM32 update from LittleFS),
+  network (Ethernet, WiFi fallback, setup AP; settings read from the
+  legacy NVS without modifying it), web page + REST API (status, targets,
+  calibration, settings, STM32 flashing, ESP32 OTA, start previous ESP32
+  firmware), basic auth with the legacy web login, task watchdog.
+- Hardware test guide: [`../testing/hardware-bringup.md`](../testing/hardware-bringup.md).
+
+Open (2b):
+- Own versioned configuration (JSON on LittleFS) incl. network settings
+  and a settings page; migration from the legacy NVS.
+- PI controller with monotonic time base, proper anti-windup, staleness
+  check; sensor-to-valve assignment.
+- Syslog, time (SNTP).
 
 ### Phase 3 – MQTT / Home Assistant
 - LWT + birth message, `availability_topic`, client id derived from MAC.

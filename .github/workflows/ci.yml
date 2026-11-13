@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [common/protocol, firmware/stm32]
+        project: [common/protocol, firmware/stm32, firmware/esp32]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
