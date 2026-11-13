@@ -80,7 +80,10 @@ every 5 minutes (it assumes a hang), which does no harm.
   calibration** – only a reference run (close to the endstop) per valve.
 - **Failsafe**: if the STM32 hears nothing from the ESP32 for 5 minutes
   (e.g. the ESP32 is being updated or is back on the legacy firmware), it
-  opens all valves.
+  opens all valves. To test it without unplugging anything: set a short
+  *Link timeout* (e.g. 30 s) in the STM32 settings, then use *Diagnostics →
+  Pause link*. The valves open after the timeout; when the pause ends the
+  log shows "STM32 was in failsafe" and the valves return to their targets.
 
 ## 5. What to check and report
 

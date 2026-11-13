@@ -165,6 +165,7 @@ void handleState()
 
     JsonObject link = doc.createNestedObject("link");
     link["state"] = vdm::linkStateName(m.state);
+    link["paused_s"] = m.pause_left_s;
     JsonObject st = link.createNestedObject("stats");
     st["requests"] = m.stats.requests;
     st["retries"] = m.stats.retries;
@@ -561,6 +562,17 @@ void webBegin()
     server.on("/api/scan", HTTP_POST, [] { handleSimple(CommandType::SensorScan); });
     server.on("/api/stm32/reset", HTTP_POST, [] { handleSimple(CommandType::ResetStm32); });
     server.on("/api/stm32/hardreset", HTTP_POST, [] { handleSimple(CommandType::HardResetStm32); });
+    server.on("/api/link/pause", HTTP_POST, [] {
+        if (!authorized()) {
+            return;
+        }
+        long sec = server.arg("seconds").toInt();
+        if (!server.hasArg("seconds") || sec < 0 || sec > 3600) {
+            reply(false, "seconds 0..3600 required");
+            return;
+        }
+        reply(command(CommandType::PauseLink, static_cast<uint16_t>(sec)), "queue full");
+    });
     server.on("/api/config/system", HTTP_POST, handleSystemConfig);
     server.on("/api/config/motor", HTTP_POST, handleMotorParams);
     server.on("/api/config/channels", HTTP_POST, handleChannels);

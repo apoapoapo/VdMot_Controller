@@ -310,6 +310,34 @@ static void test_restart_stm32_via_link(void)
     TEST_ASSERT_TRUE(logged);
 }
 
+static void test_pause_link_triggers_failsafe(void)
+{
+    Rig r;
+    r.runMs(2000);
+    vdm_system_config_t c = r.m().sys;
+    c.link_timeout_s = 30;
+    TEST_ASSERT_TRUE(r.client.setSystemConfig(c));
+    r.client.setTarget(0, 200);
+    r.runMs(3u * 60u * 1000u);
+    TEST_ASSERT_FALSE(r.stm->ctl.failsafeActive());
+
+    r.client.pause(r.now, 45000);
+    r.runMs(40000);
+    TEST_ASSERT_TRUE(r.stm->ctl.failsafeActive());
+    TEST_ASSERT_TRUE(r.m().pause_left_s > 0);
+    TEST_ASSERT_FALSE(r.client.takeHardResetRequest()); /* no reset because of a pause */
+    r.runMs(3u * 60u * 1000u);
+    TEST_ASSERT_FALSE(r.stm->ctl.failsafeActive()); /* ended by the next request */
+    TEST_ASSERT_EQUAL_UINT32(0, r.m().pause_left_s);
+    bool logged = false;
+    for (uint8_t i = 0; i < r.m().log_count; i++) {
+        logged = logged || strstr(r.m().log[i].text, "failsafe (link timeout)") != nullptr;
+    }
+    TEST_ASSERT_TRUE(logged);
+    /* the valve was opened by the failsafe and goes back to the user's target */
+    TEST_ASSERT_UINT16_WITHIN(6, 200, r.m().valves[0].actual);
+}
+
 static void test_suspend_for_update(void)
 {
     Rig r;
@@ -333,6 +361,7 @@ int main(void)
     RUN_TEST(test_silent_stm_requests_hard_reset);
     RUN_TEST(test_commands_and_errors);
     RUN_TEST(test_restart_stm32_via_link);
+    RUN_TEST(test_pause_link_triggers_failsafe);
     RUN_TEST(test_suspend_for_update);
     return UNITY_END();
 }

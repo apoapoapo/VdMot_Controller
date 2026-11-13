@@ -231,10 +231,35 @@ void LinkClient::startNext(uint32_t now_ms)
     send(cur_, now_ms);
 }
 
+void LinkClient::pause(uint32_t now_ms, uint32_t duration_ms)
+{
+    paused_ = duration_ms > 0;
+    paused_until_ms_ = now_ms + duration_ms;
+    pending_ = false;
+    model_.pause_left_s = (duration_ms + 999u) / 1000u;
+    char text[64];
+    int n = paused_ ? snprintf(text, sizeof(text), "link paused for %lu s (failsafe test)",
+                               static_cast<unsigned long>(duration_ms / 1000u))
+                    : snprintf(text, sizeof(text), "link resumed");
+    model_.addLog(now_ms, VDM_LOG_INFO, text, n > 0 ? static_cast<size_t>(n) : 0u);
+}
+
 void LinkClient::tick(uint32_t now_ms)
 {
     if (model_.state == LinkState::Updating) {
         return;
+    }
+    if (paused_) {
+        int32_t left = static_cast<int32_t>(paused_until_ms_ - now_ms);
+        if (left > 0) {
+            model_.pause_left_s = (static_cast<uint32_t>(left) + 999u) / 1000u;
+            return;
+        }
+        paused_ = false;
+        model_.pause_left_s = 0;
+        last_contact_ms_ = now_ms; /* no hard reset because of the pause */
+        static const char kMsg[] = "link resumed";
+        model_.addLog(now_ms, VDM_LOG_INFO, kMsg, sizeof(kMsg) - 1);
     }
 
     if (pending_ && now_ms - sent_ms_ >= kTimeoutMs) {
@@ -570,6 +595,8 @@ void LinkClient::onEvent(const vdm_frame_t &f, uint32_t now_ms)
     case VDM_EVT_LINK_TIMEOUT: {
         static const char kMsg[] = "STM32 was in failsafe (link timeout)";
         model_.addLog(now_ms, VDM_LOG_WARN, kMsg, sizeof(kMsg) - 1);
+        /* the STM32 kept the failsafe targets: send ours again */
+        desired_dirty_ |= desired_valid_;
         return;
     }
     case VDM_EVT_LOG: {

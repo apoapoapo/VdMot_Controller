@@ -61,7 +61,10 @@ label{display:flex;justify-content:space-between;gap:8px}progress{width:200px}
 <div class="row"><button onclick="act('stm32/reset')">Restart STM32</button><button onclick="act('stm32/hardreset')">Hard reset STM32</button>
 <button onclick="if(confirm('Restart the ESP32?'))act('reboot')">Restart ESP32</button></div>
 <div class="row"><span id="prev" class="mut"></span><button id="rb" onclick="if(confirm('Start the previous ESP32 firmware (e.g. the legacy 1.x)?'))act('esp/rollback')">Start previous ESP32 firmware</button></div></section>
-<section><h2>Diagnostics</h2><div class="grid" id="diag"></div></section>
+<section><h2>Diagnostics</h2><div class="grid" id="diag"></div>
+<div class="row">Failsafe test: pause the link for <input type=number id=pause min=0 max=3600 value=360> s
+<button onclick="pauseLink()">Pause link</button><button onclick="pauseLink(0)">Resume</button>
+<span class="mut">The STM32 enters the failsafe after its link timeout (default 300 s; can be lowered in the STM32 settings).</span></div></section>
 <section><h2>Log</h2><table><tbody id="log"></tbody></table></section>
 </main>
 <script>
@@ -84,7 +87,7 @@ function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','
 let toastT=0;function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',4000)}
 const DONE={'stm32/reset':'Restart sent – the STM32 restarts (see boot # and log)','stm32/hardreset':'Reset pulse sent – only reaches the STM32 with jumper X20',
 calibrate:'Calibration scheduled',detect:'Detection scheduled',stop:'Stop sent',scan:'Bus search started',target:'Target sent',
-'config/system':'System settings saved','config/motor':'Motor parameters saved','config/channels':'Channels saved',reboot:'ESP32 restarts…','esp/rollback':'Starting the previous firmware…'};
+'config/system':'System settings saved','config/motor':'Motor parameters saved','config/channels':'Channels saved',reboot:'ESP32 restarts…','link/pause':'Link pause changed','esp/rollback':'Starting the previous firmware…'};
 /* actions are sent url-encoded (the ESP32 web server does not handle empty multipart bodies) */
 async function post(path,body){let j;const c=new AbortController();const t=setTimeout(()=>c.abort(),8000);
 try{const r=await fetch('/api/'+path,{method:'POST',body:new URLSearchParams(body||undefined),signal:c.signal});j=await r.json().catch(()=>({ok:false,error:'HTTP '+r.status}))}
@@ -95,6 +98,7 @@ let lastState=null;
 function defaults(id,kind){const d=lastState&&lastState.defaults&&lastState.defaults[kind];if(!d)return;
 Object.entries(d).forEach(([k,v])=>{const i=$(id).querySelector(`[name=${k}]`);if(i)i.value=v});dirty.add(id);toast('Defaults loaded – click Save to apply')}
 let espUpload=false;
+function pauseLink(sec){const f=new FormData();f.append('seconds',sec===undefined?$('pause').value:sec);post('link/pause',f)}
 function setT(ch){const v=$('t'+ch).value;const f=new FormData();f.append('ch',ch);f.append('pos',v);editing.delete(ch);post('target',f)}
 /* forms with unsaved edits are not overwritten by the periodic refresh */
 const dirty=new Set();const FORMID={system:'sysf',motor:'motf',channels:'chans'};
@@ -111,7 +115,7 @@ if(!vals)return;fields.forEach(([k])=>{const lab=g.querySelector(`[data-k=${k}]`
 lab.classList.toggle('chg',!!diff);lab.querySelector('small').textContent=diff?`(default ${defs[k]})`:''});
 if(!dirty.has(id))fields.forEach(([k])=>{g.querySelector(`[name=${k}]`).value=vals[k]})}
 async function refresh(){let s;try{s=await (await fetch('/api/state')).json()}catch(e){$('link').textContent='ESP32 not reachable';return}
-const l=s.link;$('link').textContent='STM32 '+l.state;$('link').className='pill '+(l.state==='connected'?'ok':'bad');
+const l=s.link;$('link').textContent='STM32 '+l.state+(l.paused_s?` (link paused, ${l.paused_s} s)`:'');$('link').className='pill '+(l.state==='connected'?'ok':'bad');
 $('ver').textContent='ESP32 '+s.esp.version+(s.stm?(' · STM32 '+s.stm.version+' ('+s.stm.mcu+', '+s.stm.hw+') · boot #'+s.stm.boot_count+', last reset: '+(RESETS[s.stm.reset_cause]||s.stm.reset_cause)+', up '+dur(s.diag&&s.diag.stm_uptime_s)):'');
 $('net').textContent=s.net.interface+' '+s.net.ip+(s.net.ap?(' · AP '+s.net.ap_ssid):'');$('err').textContent=s.error||'';
 /* the valve table is built once; afterwards only the cells are updated, so

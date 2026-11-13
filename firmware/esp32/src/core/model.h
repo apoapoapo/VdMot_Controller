@@ -46,6 +46,7 @@ struct Model {
     LinkState state = LinkState::Disconnected;
     uint32_t state_since_ms = 0;
     LinkStats stats;
+    uint32_t pause_left_s = 0; /* link paused for a failsafe test */
 
     bool hello_valid = false;
     vdm_hello_t hello{};

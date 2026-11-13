@@ -194,6 +194,9 @@ void execute(const Command &c)
     case CommandType::HardResetStm32:
         hardReset();
         break;
+    case CommandType::PauseLink:
+        client->pause(millis(), static_cast<uint32_t>(c.value) * 1000u);
+        break;
     case CommandType::FlashStm32:
         flashStm32();
         break;

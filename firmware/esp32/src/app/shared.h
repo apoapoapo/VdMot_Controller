@@ -28,6 +28,7 @@ enum class CommandType : uint8_t {
     ResetStm32,     /* RESET request */
     HardResetStm32, /* NRST pulse */
     FlashStm32,     /* image in LittleFS, see kStm32ImagePath */
+    PauseLink,      /* value: seconds, 0 = resume */
 };
 
 struct Command {

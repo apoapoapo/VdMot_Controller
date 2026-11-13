@@ -535,7 +535,8 @@ operation.
   - If `failsafe_pos` ≠ `0xFFFF`, every channel is moved there, with the
     `FAILSAFE` flag set.
   - The first valid request afterwards ends the failsafe state. The targets
-    stay unchanged until the ESP sends new ones.
+    stay unchanged until the ESP sends new ones; the ESP32 firmware resends
+    its targets when it receives `EVT_LINK_TIMEOUT`.
   - Failsafe targets are never stored in the EEPROM.
 
 ---

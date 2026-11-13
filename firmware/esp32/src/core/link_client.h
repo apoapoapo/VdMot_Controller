@@ -67,6 +67,9 @@ class LinkClient
 
     /* The STM32 firmware is being updated: stop talking to it. */
     void suspend(uint32_t now_ms);
+    /* Stops sending requests for `duration_ms` (e.g. to test the STM32
+     * failsafe); events are still received. 0 resumes at once. */
+    void pause(uint32_t now_ms, uint32_t duration_ms);
     void resume(uint32_t now_ms);
 
     /* true once when the app should pulse NRST */
@@ -122,6 +125,8 @@ class LinkClient
     bool hello_sent_ = false;
     uint32_t last_contact_ms_ = 0;
     uint32_t last_hard_reset_ms_ = 0;
+    bool paused_ = false;
+    uint32_t paused_until_ms_ = 0;
     bool hard_reset_done_ = false;
     bool hard_reset_request_ = false;
 
