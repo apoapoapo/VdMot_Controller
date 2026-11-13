@@ -250,6 +250,38 @@ static void test_restored_calibration_uses_reference_run(void)
     assertPositionMatches(r2, 0, 6);
 }
 
+static void test_reference_goes_to_the_nearer_endstop(void)
+{
+    vdm::ChannelPersist p;
+    {
+        Rig r;
+        r.vm.setTarget(0, 1000);
+        TEST_ASSERT_TRUE(r.settle());
+        p = r.vm.persist(0);
+    }
+    /* restart with the valve still fully open and the stored target 100 % */
+    Rig r2(0x0000);
+    r2.vm.restore(0, p);
+    r2.vm.setTarget(0, 1000);
+    r2.vm.setPositionHint(0, 1000);
+    r2.board.v[0].x = 1.0;
+    r2.vm.setEnabledMask(0x0001);
+    double min_x = 1.0;
+    for (uint32_t k = 0; k < 120000; k++) {
+        r2.step();
+        if (r2.board.v[0].x < min_x) {
+            min_x = r2.board.v[0].x;
+        }
+    }
+    TEST_ASSERT_TRUE(min_x > 0.98); /* only the detection move, no full stroke */
+    vdm_valve_state_t s = st(r2, 0);
+    TEST_ASSERT_EQUAL_UINT16(1000, s.actual);
+    TEST_ASSERT_TRUE(s.flags & VDM_VFLAG_AT_ENDSTOP);
+    vdm_evt_calibration_t evt;
+    TEST_ASSERT_FALSE(r2.vm.popCalibrationEvent(evt));
+    TEST_ASSERT_EQUAL_UINT32(0, r2.board.violations);
+}
+
 static void test_recalibration_after_moves(void)
 {
     Rig r;
@@ -323,6 +355,7 @@ int main(void)
     RUN_TEST(test_endstop_without_current_rise_is_found_by_stall);
     RUN_TEST(test_endless_motor_times_out);
     RUN_TEST(test_restored_calibration_uses_reference_run);
+    RUN_TEST(test_reference_goes_to_the_nearer_endstop);
     RUN_TEST(test_recalibration_after_moves);
     RUN_TEST(test_stop_aborts_and_keeps_position);
     RUN_TEST(test_disable_and_psu_off);

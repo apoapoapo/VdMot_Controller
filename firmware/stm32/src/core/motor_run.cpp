@@ -47,6 +47,8 @@ bool MotorRun::start(const RunParams &params)
     low_ms_ = 0;
     sum_abs_ = 0;
     sum_cnt_ = 0;
+    turn_sum_ = 0;
+    turn_cnt_ = 0;
     peak_ = 0;
     outcome_ = RunOutcome::None;
 
@@ -98,7 +100,11 @@ RunResult MotorRun::result() const
     r.outcome = outcome_;
     r.pulses = pulses_;
     r.duration_ms = stop_ms_;
-    r.mean_ma10 = sum_cnt_ ? static_cast<uint16_t>(sum_abs_ / sum_cnt_) : 0;
+    if (turn_cnt_ > 0) {
+        r.mean_ma10 = static_cast<uint16_t>(turn_sum_ / turn_cnt_);
+    } else {
+        r.mean_ma10 = sum_cnt_ ? static_cast<uint16_t>(sum_abs_ / sum_cnt_) : 0;
+    }
     r.peak_ma10 = peak_;
     return r;
 }
@@ -134,6 +140,8 @@ void MotorRun::onPulse()
     pulses_ = n;
     if (p == kRunning) {
         last_pulse_ms_ = elapsed_ms_;
+        turn_sum_ = sum_abs_;
+        turn_cnt_ = sum_cnt_;
         if (params_.target_pulses != 0 && n >= params_.target_pulses && !target_hit_) {
             /* switch off right away for accuracy, finish() follows on the
              * next sample */

@@ -182,6 +182,17 @@ static void test_stall_is_an_endstop(void)
     TEST_ASSERT_EQUAL(RunOutcome::Endstop, run->result().outcome);
 }
 
+static void test_mean_current_excludes_stall(void)
+{
+    TEST_ASSERT_TRUE(run->start(params()));
+    feed(1000, 200, 3); /* turning at 20 mA */
+    feed(1300, 250, 0); /* stalled at 25 mA until the stall detection */
+    finishCoast();
+    vdm::RunResult r = run->result();
+    TEST_ASSERT_EQUAL(RunOutcome::Endstop, r.outcome);
+    TEST_ASSERT_UINT16_WITHIN(5, 200, r.mean_ma10);
+}
+
 static void test_dynamic_reference_without_calibration(void)
 {
     RunParams p = params();
@@ -246,6 +257,7 @@ int main(void)
     RUN_TEST(test_no_pulses);
     RUN_TEST(test_stall_is_an_endstop);
     RUN_TEST(test_dynamic_reference_without_calibration);
+    RUN_TEST(test_mean_current_excludes_stall);
     RUN_TEST(test_overcurrent_even_during_blanking);
     RUN_TEST(test_short_spike_is_ignored);
     RUN_TEST(test_timeout);

@@ -61,6 +61,8 @@ void Controller::begin(uint32_t now_ms)
             t = sys_.failsafe_pos != VDM_POS_HOLD ? sys_.failsafe_pos : VDM_POS_MAX;
         }
         valves_.setTarget(ch, t);
+        /* the valves were most probably left at their stored target */
+        valves_.setPositionHint(ch, have_targets ? stored[ch] : t);
         saved_targets_[ch] = have_targets ? stored[ch] : t;
     }
 

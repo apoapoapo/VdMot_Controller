@@ -525,6 +525,18 @@ void LinkClient::onEvent(const vdm_frame_t &f, uint32_t now_ms)
         if (vdm_dec_evt_calibration(f.payload, f.len, &c, nullptr) == VDM_OK) {
             model_.calibration[c.channel] = c;
             model_.calibration_valid[c.channel] = true;
+            char text[96];
+            int n;
+            if (c.result == VDM_FAULT_NONE) {
+                n = snprintf(text, sizeof(text), "valve %u calibrated: open %lu / close %lu pulses",
+                             c.channel + 1u, static_cast<unsigned long>(c.open_counts),
+                             static_cast<unsigned long>(c.close_counts));
+            } else {
+                n = snprintf(text, sizeof(text), "valve %u calibration failed (fault %u)",
+                             c.channel + 1u, c.result);
+            }
+            model_.addLog(now_ms, c.result == VDM_FAULT_NONE ? VDM_LOG_INFO : VDM_LOG_WARN, text,
+                          n > 0 ? static_cast<size_t>(n) : 0u);
         }
         return;
     }

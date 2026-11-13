@@ -201,6 +201,11 @@ static void test_target_via_link(void)
     TEST_ASSERT_UINT16_WITHIN(6, 650, s.actual);
     TEST_ASSERT_DOUBLE_WITHIN(0.006, 0.65, r.stm->board.v[0].x);
     TEST_ASSERT_TRUE(r.m().calibration_valid[0]);
+    bool logged = false;
+    for (uint8_t i = 0; i < r.m().log_count; i++) {
+        logged = logged || strstr(r.m().log[i].text, "valve 1 calibrated") != nullptr;
+    }
+    TEST_ASSERT_TRUE(logged);
     TEST_ASSERT_TRUE(r.m().detail_valid[0]);
 }
 

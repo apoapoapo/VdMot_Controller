@@ -74,6 +74,10 @@ class ValveManager
     {
         op_hours_ = hours;
     }
+    /* Where the valve probably is after a restart (0.1 %, e.g. the last
+     * stored target): the reference run goes to the nearer endstop and the
+     * detection move goes the other way. */
+    void setPositionHint(uint8_t ch, uint16_t permille);
 
     /* Restores persisted data before the first tick(). */
     void restore(uint8_t ch, const ChannelPersist &p);
@@ -131,7 +135,8 @@ class ValveManager
         int32_t pos_ppm = 0;
         uint16_t target = 0;
         bool want_detect = false;
-        bool detect_close = false; /* second attempt in closing direction */
+        bool detect_second = false; /* second attempt in the other direction */
+        bool near_open = false;     /* position hint: closer to the open endstop */
         bool want_calib = false;
         bool want_reference = false;
         uint8_t blocked_cnt = 0;

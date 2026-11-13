@@ -450,7 +450,7 @@ Bits 5–7 are reserved (0).
 | `4` | OVERCURRENT | current above the hard limit of 250 mA for 3 ms (e.g. short circuit), checked from the first sample on |
 | `5` | CALIB_FAILED | stroke < `min_stroke_counts` after all retries |
 | `6` | NO_PULSES | current flows but not a single back-EMF pulse arrives (detection in both directions, or a move to an intermediate position) |
-| `7` | COUNT_MISMATCH | the reference run counted more than the learned closing stroke + 15 %; reported in `last_fault`, a calibration is scheduled |
+| `7` | COUNT_MISMATCH | the reference run counted more than the learned stroke of its direction + 15 %; reported in `last_fault`, a calibration is scheduled |
 
 #### `SensorValue` (16 bytes)
 
@@ -517,13 +517,17 @@ operation.
 - After boot:
   1. Every enabled channel is checked with a detection move (see `DETECT`).
   2. A connected channel with valid calibration performs a **reference run**
-     towards closed until the endstop; one without calibration is calibrated.
+     to the **nearer endstop**, judged by the last stored target (≥ 50 %:
+     open endstop, otherwise closed endstop). A valve left at 100 % only
+     presses against its open endstop briefly. The detection move of step 1
+     goes the other way, away from that endstop. A channel without
+     calibration is calibrated.
   3. Then it moves to its target: `startup_pos`, or the last stored target
      if `startup_pos` = `0xFFFF` (targets are stored at most every 10 minutes;
      without any stored target the failsafe position is used).
-  4. If the reference run counts more pulses than the learned closing stroke
-     + 15 %, the STM32 reports `COUNT_MISMATCH` in `last_fault` and schedules
-     a calibration.
+  4. If the reference run counts more pulses than the learned stroke of its
+     direction + 15 %, the STM32 reports `COUNT_MISMATCH` in `last_fault` and
+     schedules a calibration.
 - Only one motor moves at a time; channels with pending work report
   `QUEUED`. The valve power supply is switched on 1 s before the first move
   and off 10 s after the last one.

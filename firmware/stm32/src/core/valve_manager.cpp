@@ -90,6 +90,13 @@ void ValveManager::setEnabledMask(uint16_t mask)
     enabled_mask_ = mask;
 }
 
+void ValveManager::setPositionHint(uint8_t ch, uint16_t permille)
+{
+    if (ch < kChannels) {
+        ch_[ch].near_open = permille >= VDM_POS_MAX / 2u;
+    }
+}
+
 void ValveManager::restore(uint8_t ch, const ChannelPersist &p)
 {
     if (ch < kChannels) {
@@ -405,7 +412,8 @@ bool ValveManager::setupJob(uint8_t ch, Job job)
 
     switch (job) {
     case Job::Detect:
-        job_dir_ = c.detect_close ? Dir::Close : Dir::Open;
+        /* away from the endstop the valve is probably at */
+        job_dir_ = (c.near_open != c.detect_second) ? Dir::Close : Dir::Open;
         run_target_pulses_ = kDetectPulses;
         break;
     case Job::Calibrate:
@@ -415,7 +423,8 @@ bool ValveManager::setupJob(uint8_t ch, Job job)
         run_target_pulses_ = 0;
         break;
     case Job::Reference:
-        job_dir_ = Dir::Close;
+        /* to the nearer endstop */
+        job_dir_ = c.near_open ? Dir::Open : Dir::Close;
         run_target_pulses_ = 0;
         break;
     case Job::Move:
@@ -642,8 +651,8 @@ bool ValveManager::finishDetect(const RunResult &r)
 {
     Channel &c = ch_[job_ch_];
     c.want_detect = false;
-    bool first = !c.detect_close;
-    c.detect_close = false;
+    bool first = !c.detect_second;
+    c.detect_second = false;
     if (r.outcome == RunOutcome::TargetReached) {
         c.mode = VDM_MODE_IDLE;
         c.fault = VDM_FAULT_NONE;
@@ -656,9 +665,9 @@ bool ValveManager::finishDetect(const RunResult &r)
         return true;
     }
     if (first && (r.outcome == RunOutcome::NoPulses || r.outcome == RunOutcome::Endstop)) {
-        /* possibly sitting at the open endstop: try the other direction */
+        /* possibly sitting at that endstop: try the other direction */
         c.want_detect = true;
-        c.detect_close = true;
+        c.detect_second = true;
         return true;
     }
     if (r.outcome == RunOutcome::Endstop) {
@@ -726,11 +735,13 @@ void ValveManager::finishReference(const RunResult &r)
     if (r.outcome != RunOutcome::Endstop) {
         return; /* failure, handled by onRunDone() */
     }
+    bool open = job_dir_ == Dir::Open;
+    uint32_t stroke = open ? c.p.open_counts : c.p.close_counts;
     c.want_reference = false;
     c.pos_known = true;
-    c.pos_ppm = 0;
+    c.pos_ppm = open ? kFull : 0;
     c.at_endstop = true;
-    if (c.p.calibrated && r.pulses > c.p.close_counts + c.p.close_counts * 15u / 100u + 200u) {
+    if (c.p.calibrated && r.pulses > stroke + stroke * 15u / 100u + 200u) {
         c.last_fault = VDM_FAULT_COUNT_MISMATCH;
         c.want_calib = true;
     }

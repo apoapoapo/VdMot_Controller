@@ -52,7 +52,8 @@ struct RunResult {
     RunOutcome outcome;
     uint32_t pulses;      /* including pulses counted while coasting */
     uint32_t duration_ms; /* until the motor was switched off */
-    uint16_t mean_ma10;   /* mean |I| after the inrush blanking */
+    uint16_t mean_ma10;   /* mean |I| after the inrush blanking while the motor turned
+                           * (up to the last pulse, so a stall does not count) */
     uint16_t peak_ma10;   /* peak filtered |I| after the inrush blanking */
 };
 
@@ -126,6 +127,8 @@ class MotorRun
     uint32_t low_ms_ = 0;
     uint64_t sum_abs_ = 0;
     uint32_t sum_cnt_ = 0;
+    uint64_t turn_sum_ = 0; /* sum_abs_/sum_cnt_ at the last pulse */
+    uint32_t turn_cnt_ = 0;
     uint16_t peak_ = 0;
     RunOutcome outcome_ = RunOutcome::None;
 };
