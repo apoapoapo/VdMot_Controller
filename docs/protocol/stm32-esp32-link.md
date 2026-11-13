@@ -363,7 +363,7 @@ Shared by all channels. Fields:
 | `opencircuit_ma10` | u16 | 5…100 | 20 | below this current "no motor" is assumed (0.1 mA) … |
 | `opencircuit_ms` | u16 | 100…5000 | 500 | … if it persists this long **without interruption** |
 | `move_timeout_s` | u16 | 10…600 | 120 | maximum duration of a single move |
-| `min_stroke_counts` | u16 | 100…60000 | 3000 | minimum pulses for a valid stroke |
+| `min_stroke_counts` | u16 | 100…60000 | 2000 | minimum pulses for a valid stroke (HmIP-VdMot on the test board: ~3100–3800) |
 | `max_calib_retries` | u8 | 0…5 | 2 | retries after a failed calibration |
 
 Endstop detection: after the inrush blanking the filtered current is

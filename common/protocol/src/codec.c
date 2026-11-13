@@ -28,7 +28,7 @@ const vdm_motor_params_t vdm_motor_params_default = {
     .opencircuit_ma10 = 20,
     .opencircuit_ms = 500,
     .move_timeout_s = 120,
-    .min_stroke_counts = 3000,
+    .min_stroke_counts = 2000,
     .max_calib_retries = 2,
 };
 

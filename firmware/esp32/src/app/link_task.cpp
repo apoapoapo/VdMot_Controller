@@ -156,8 +156,8 @@ void flashStm32()
 void hardReset()
 {
     digitalWrite(kPinStmBoot0, LOW);
-    digitalWrite(kPinStmReset, HIGH);
-    delay(50);
+    digitalWrite(kPinStmReset, HIGH); /* only reaches the STM32 with jumper X20 set */
+    delay(150);
     digitalWrite(kPinStmReset, LOW);
 }
 

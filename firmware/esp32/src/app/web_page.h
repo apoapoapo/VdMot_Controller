@@ -65,6 +65,8 @@ const MODES=['disabled','unknown','not connected','idle','opening','closing','ca
 const FAULTS=['','open circuit','blocked','timeout','overcurrent','calibration failed','no pulses','count mismatch'];
 const KINDS=['','DS18B20 °C','DS2438 VAD V','DS2438 VDD V','DS2438 °C'];
 const SSTAT=['ok','CRC error','unreachable','not measured','out of range'];
+const RESETS=['unknown','power-on','reset pin','software','watchdog','brown-out','low-power'];
+function dur(s){if(s===undefined)return '?';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'d ':'')+(d||h?h+'h ':'')+m+'min'}
 const SYSF=[['link_timeout_s','Link timeout s (0 = off)'],['failsafe_pos','Failsafe position ‰ (65535 = hold)'],
 ['startup_pos','Startup position ‰ (65535 = last)'],['sensor_interval_s','Sensor interval s'],
 ['recal_after_moves','Recalibrate after moves'],['recal_after_days','Recalibrate after days']];
@@ -90,7 +92,7 @@ function fill(id,fields,vals){const g=$(id);if(!formsDone)g.innerHTML=fields.map
 if(vals&&!g.contains(document.activeElement))fields.forEach(([k])=>{g.querySelector(`[name=${k}]`).value=vals[k]})}
 async function refresh(){let s;try{s=await (await fetch('/api/state')).json()}catch(e){$('link').textContent='ESP32 not reachable';return}
 const l=s.link;$('link').textContent='STM32 '+l.state;$('link').className='pill '+(l.state==='connected'?'ok':'bad');
-$('ver').textContent='ESP32 '+s.esp.version+(s.stm?(' · STM32 '+s.stm.version+' ('+s.stm.mcu+', '+s.stm.hw+')'):'');
+$('ver').textContent='ESP32 '+s.esp.version+(s.stm?(' · STM32 '+s.stm.version+' ('+s.stm.mcu+', '+s.stm.hw+') · boot #'+s.stm.boot_count+', last reset: '+(RESETS[s.stm.reset_cause]||s.stm.reset_cause)+', up '+dur(s.diag&&s.diag.stm_uptime_s)):'');
 $('net').textContent=s.net.interface+' '+s.net.ip+(s.net.ap?(' · AP '+s.net.ap_ssid):'');$('err').textContent=s.error||'';
 $('valves').innerHTML=s.valves.map(v=>{const m=MODES[v.mode]||v.mode;const cls=v.mode===8?'bad':(v.mode===2||v.mode===0?'mut':'');
 const keep=editing.has(v.ch)&&$('t'+v.ch)?$('t'+v.ch).value:(v.target/10);
