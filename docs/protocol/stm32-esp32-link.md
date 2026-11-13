@@ -534,9 +534,11 @@ operation.
 - If `link_timeout_s` ≠ 0 and no valid request arrives for that long:
   - If `failsafe_pos` ≠ `0xFFFF`, every channel is moved there, with the
     `FAILSAFE` flag set.
-  - The first valid request afterwards ends the failsafe state. The targets
-    stay unchanged until the ESP sends new ones; the ESP32 firmware resends
-    its targets when it receives `EVT_LINK_TIMEOUT`.
+  - The first valid request afterwards ends the failsafe state, before the
+    request itself is executed. The STM32 restores the targets it had
+    before the failsafe (the ESP32 may have restarted and lost them); a
+    target sent in that first request takes precedence. The ESP32 firmware
+    additionally resends its targets when it receives `EVT_LINK_TIMEOUT`.
   - Failsafe targets are never stored in the EEPROM.
 
 ---

@@ -8,6 +8,7 @@
 
 #include <deque>
 #include <memory>
+#include <new>
 
 #include "core/link_client.h"
 
@@ -115,6 +116,14 @@ struct Rig {
     Rig()
     {
         reboot(0.3);
+    }
+
+    /* the ESP32 restarts: a fresh LinkClient that knows nothing */
+    void restartEsp()
+    {
+        client.~LinkClient();
+        new (&client) vdm::LinkClient(to_stm);
+        to_esp.w.q.clear();
     }
 
     void reboot(double x0)
@@ -338,6 +347,37 @@ static void test_pause_link_triggers_failsafe(void)
     TEST_ASSERT_UINT16_WITHIN(6, 200, r.m().valves[0].actual);
 }
 
+/* hardware test 2: the ESP32 restarts during the failsafe */
+static void test_failsafe_with_esp_restart_restores_targets(void)
+{
+    Rig r;
+    r.runMs(2000);
+    vdm_system_config_t c = r.m().sys;
+    c.link_timeout_s = 30;
+    TEST_ASSERT_TRUE(r.client.setSystemConfig(c));
+    r.client.setTarget(0, 200);
+    r.runMs(3u * 60u * 1000u);
+    r.client.pause(r.now, 60000);
+    r.runMs(5000);
+    r.restartEsp(); /* forgets the pause and the user's target */
+    r.stm_alive = true;
+    /* the new ESP32 needs a while to come up again */
+    for (uint32_t k = 0; k < 40000; k++) {
+        int pulses;
+        int16_t i = r.stm->board.step(&pulses);
+        for (int p = 0; p < pulses; p++)
+            r.stm->run.onPulse();
+        r.stm->run.onSample(i);
+        r.now++;
+        r.stm->ctl.tick(r.now);
+    }
+    TEST_ASSERT_TRUE(r.stm->ctl.failsafeActive());
+    r.runMs(3u * 60u * 1000u);
+    TEST_ASSERT_FALSE(r.stm->ctl.failsafeActive());
+    TEST_ASSERT_EQUAL_UINT16(200, r.m().valves[0].target);
+    TEST_ASSERT_UINT16_WITHIN(6, 200, r.m().valves[0].actual);
+}
+
 static void test_suspend_for_update(void)
 {
     Rig r;
@@ -362,6 +402,7 @@ int main(void)
     RUN_TEST(test_commands_and_errors);
     RUN_TEST(test_restart_stm32_via_link);
     RUN_TEST(test_pause_link_triggers_failsafe);
+    RUN_TEST(test_failsafe_with_esp_restart_restores_targets);
     RUN_TEST(test_suspend_for_update);
     return UNITY_END();
 }

@@ -108,6 +108,7 @@ class Controller : public RequestHandler
     uint32_t last_evt_ms_[VDM_MAX_CHANNELS] = {};
 
     uint16_t saved_targets_[VDM_MAX_CHANNELS] = {};
+    uint16_t pre_failsafe_targets_[VDM_MAX_CHANNELS] = {};
     bool targets_dirty_ = false;
     uint32_t targets_dirty_since_ = 0;
     uint16_t channels_dirty_ = 0;

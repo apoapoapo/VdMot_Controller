@@ -103,10 +103,11 @@ void Controller::saveSystem()
 void Controller::onLinkByte(uint8_t byte, uint32_t now_ms)
 {
     now_ms_ = now_ms;
-    bool was_failsafe = failsafe_active_;
     if (link_.onByte(byte)) {
         last_request_ms_ = now_ms;
-        if (was_failsafe) {
+        /* normally ended in handleRequest(); a retransmitted request is
+         * answered from the cache without calling it */
+        if (failsafe_active_) {
             endFailsafe();
         }
     }
@@ -114,9 +115,11 @@ void Controller::onLinkByte(uint8_t byte, uint32_t now_ms)
 
 void Controller::endFailsafe()
 {
+    /* back to the targets from before the failsafe: the ESP32 may have
+     * restarted meanwhile and no longer know them */
     failsafe_active_ = false;
     for (uint8_t ch = 0; ch < VDM_MAX_CHANNELS; ch++) {
-        valves_.setTarget(ch, valves_.target(ch), false);
+        valves_.setTarget(ch, pre_failsafe_targets_[ch], false);
     }
     link_timeout_evt_ = true;
 }
@@ -148,6 +151,7 @@ void Controller::tick(uint32_t now_ms)
         now_ms - last_request_ms_ >= sys_.link_timeout_s * 1000UL) {
         failsafe_active_ = true;
         for (uint8_t ch = 0; ch < VDM_MAX_CHANNELS; ch++) {
+            pre_failsafe_targets_[ch] = valves_.target(ch);
             uint16_t t = sys_.failsafe_pos != VDM_POS_HOLD ? sys_.failsafe_pos : valves_.target(ch);
             valves_.setTarget(ch, t, true);
         }
@@ -316,6 +320,12 @@ size_t Controller::handleRequest(uint8_t msg, const uint8_t *p, size_t len, uint
     size_t n = 0;
     uint8_t bad = 0;
     vdm_status_t st;
+
+    /* the link is back: end the failsafe before the request is executed,
+     * so that a new target in this very request wins */
+    if (failsafe_active_) {
+        endFailsafe();
+    }
 
     if (msg != VDM_MSG_HELLO && !hello_done_) {
         return error(resp, cap, VDM_ERR_NOT_READY);

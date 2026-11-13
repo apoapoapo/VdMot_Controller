@@ -347,10 +347,33 @@ static void test_failsafe_opens_and_ends_on_request(void)
 
     vdm_valve_state_t s = r.valveState(0); /* any request ends the failsafe */
     TEST_ASSERT_FALSE(r.ctl.failsafeActive());
-    TEST_ASSERT_EQUAL_UINT16(1000, s.target);
+    TEST_ASSERT_EQUAL_UINT16(200, s.target); /* the target from before is restored */
+    TEST_ASSERT_TRUE(r.settle());
+    TEST_ASSERT_DOUBLE_WITHIN(0.006, 0.2, r.board.v[0].x);
     r.runMs(10);
     TEST_ASSERT_EQUAL(1, r.count(VDM_KIND_EVENT, VDM_EVT_LINK_TIMEOUT));
     TEST_ASSERT_FALSE(r.valveState(0).flags & VDM_VFLAG_FAILSAFE);
+}
+
+static void test_new_target_ends_failsafe(void)
+{
+    sim::FakeEeprom e;
+    Rig r(e);
+    r.hello();
+    vdm_system_config_t c = vdm_system_config_default;
+    c.link_timeout_s = 30;
+    uint8_t b[16];
+    size_t n;
+    vdm_enc_system_config(&c, b, sizeof(b), &n);
+    r.request(VDM_MSG_SET_SYSTEM_CONFIG, b, n);
+    r.setTarget(0, 200);
+    TEST_ASSERT_TRUE(r.settle());
+    r.runMs(31000);
+    TEST_ASSERT_TRUE(r.ctl.failsafeActive());
+    /* the first request after the failsafe sets a new target: it wins */
+    TEST_ASSERT_EQUAL_UINT8(VDM_OK, r.setTarget(0, 650).at(0));
+    TEST_ASSERT_FALSE(r.ctl.failsafeActive());
+    TEST_ASSERT_EQUAL_UINT16(650, r.valveState(0).target);
 }
 
 static void test_restart_restores_calibration(void)
@@ -466,6 +489,7 @@ int main(void)
     RUN_TEST(test_config_validation_and_crc);
     RUN_TEST(test_disabled_channel_and_unknown_message);
     RUN_TEST(test_failsafe_opens_and_ends_on_request);
+    RUN_TEST(test_new_target_ends_failsafe);
     RUN_TEST(test_restart_restores_calibration);
     RUN_TEST(test_reset_flushes_and_resets);
     RUN_TEST(test_diag_and_ping);
