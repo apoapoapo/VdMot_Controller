@@ -233,6 +233,7 @@ retained, commands are not.
 | `<base>/link` | out | `online` / `offline` (STM32 link) |
 | `<base>/state` | out | `{failsafe, flow_guard, flow_added, versions…}` |
 | `<base>/zone/<zid>/state` | out | `{mode, heating, setpoint, temperature, stale, output, action}` |
+| `<base>/zone/<zid>/climate` | out | `online` in mode `control`, `offline` in mode `manual` (availability of the climate entity) |
 | `<base>/zone/<zid>/set` | in | `{"setpoint":21.5}`, `{"heating":"off"}`, `{"mode":"manual"}` |
 | `<base>/valve/<n>/state` | out | `{position, target, requested, mode, fault, current, …}` |
 | `<base>/valve/<n>/set` | in | `{"position":40}` (manual mode only), `{"calibrate":true}` |
@@ -251,8 +252,9 @@ MQTT temperature sources (3) subscribe to any topic configured there.
 
 | Entity | When | Content |
 |---|---|---|
-| `climate` | mode `control` | target temperature, current temperature, `hvac_mode` heat/off, `hvac_action` heating/idle/off |
-| `select` | always | mode `control`/`manual` (switching republishes discovery) |
+| `climate` | always; **unavailable in mode `manual`** | target temperature, current temperature, `hvac_mode` heat/off, `hvac_action` heating/idle/off |
+| `sensor` (temperature) | always | the zone's control temperature, also in mode `manual` |
+| `select` | always | mode `control`/`manual` |
 | `valve` (one per valve) | always | position; commandable in `manual` mode |
 | `sensor` | per info source | e.g. "Bathroom return" |
 | `binary_sensor` (problem) | always | stale temperature, valve fault |
@@ -269,9 +271,16 @@ everything shows as unavailable if the ESP32 or the STM32 is gone.
 Discovery is sent again when HA announces `homeassistant/status = online`;
 it does not block the firmware.
 
+**Switching a zone to `manual`:** the `climate` entity is kept but marked
+unavailable (own availability topic `<base>/zone/<zid>/climate`), so
+dashboards and automations keep their reference; switching back to
+`control` makes it available again. The temperature stays visible through
+the zone's temperature sensor. `climate` → off is unambiguous: heating off,
+valves at their minimum opening. "Manual" is not a climate state but the
+separate mode select.
+
 **If HA controls the rooms itself:** set the zone to `manual` and use HA's
-own thermostat with the `valve` entities. In that case no `climate` comes
-from the controller.
+own thermostat with the `valve` entities.
 
 `climate` in short: it shows and sets the target temperature, shows the
 measured temperature, switches heating on/off and shows whether the zone
@@ -299,9 +308,13 @@ New sections in the existing style; the full redesign follows in phase 4:
 | 3 | MQTT and HA discovery as described in 7 and 8 |
 | later | KNX adapter on the same model (setpoint, actual value, output, mode per zone; sources of type `knx`) |
 
-## 11. Open points
+## 11. Decisions and later ideas
 
-- Default values for `min_pos` and `min_total` on a fresh device (proposal:
-  0 / off, to be set during commissioning).
-- Window contact per zone (setpoint lowered while open)?
-- A display of the supply/return temperature difference per zone?
+Decided:
+- `min_pos` and `min_total` are **off by default** (0) and are set during
+  commissioning.
+
+Later, optional (not part of v1):
+- window contact per zone (setpoint lowered while open);
+- supply/return temperature difference per zone (until then the info
+  sources show both temperatures side by side).
