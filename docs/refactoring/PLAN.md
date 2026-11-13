@@ -174,12 +174,12 @@ Done (2a, bring-up for the first hardware test):
   firmware), basic auth with the legacy web login, task watchdog.
 - Hardware test guide: [`../testing/hardware-bringup.md`](../testing/hardware-bringup.md).
 
-Open (2b):
-- Own versioned configuration (JSON on LittleFS) incl. network settings
-  and a settings page; migration from the legacy NVS.
-- PI controller with monotonic time base, proper anti-windup, staleness
-  check; sensor-to-valve assignment.
-- Syslog, time (SNTP).
+Open (2b): see the design [`../design/esp32-control-and-integration.md`](../design/esp32-control-and-integration.md)
+- configuration store (JSON on LittleFS, versioned, atomic), network/device/
+  MQTT settings; the legacy configuration is not taken over (decided)
+- temperature sources (1-Wire, MQTT, later KNX), zones with one or more
+  valves, PI controller per zone, flow guard (minimum opening per valve
+  and in total), fallback position
 
 ### Phase 3 – MQTT / Home Assistant
 - LWT + birth message, `availability_topic`, client id derived from MAC.
