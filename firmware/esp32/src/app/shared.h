@@ -43,6 +43,7 @@ struct UpdateStatus {
     uint8_t percent = 0;
     char phase[24] = "";
     char result[64] = "";
+    char detail[256] = "";
 };
 
 constexpr const char *kStm32ImagePath = "/stm32.bin";

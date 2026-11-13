@@ -50,6 +50,7 @@ static void test_software_entry_without_boot0(void)
     Stm32Flasher f;
     TEST_ASSERT_EQUAL(FlashResult::Ok, f.flash(bl, img));
     TEST_ASSERT_EQUAL_INT(1, bl.software_entries);
+    TEST_ASSERT_NOT_NULL(strstr(f.trace(), "BEEFIT"));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(img.data.data(), bl.flash.data(), img.data.size());
 }
 
@@ -80,6 +81,8 @@ static void test_boot0_fallback_for_blank_chip(void)
     unwired.boot0_wired = false;
     TEST_ASSERT_EQUAL(FlashResult::NoBootloader, f.flash(unwired, img));
     TEST_ASSERT_FALSE(unwired.boot0);
+    TEST_ASSERT_NOT_NULL(strstr(f.trace(), "no BEEFIT"));
+    TEST_ASSERT_NOT_NULL(strstr(f.trace(), "boot0: no answer"));
 }
 
 static void test_large_image_erases_more_sectors(void)

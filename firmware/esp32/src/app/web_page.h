@@ -53,6 +53,7 @@ label{display:flex;justify-content:space-between;gap:8px}progress{width:200px}
 <div class="row">STM32 image (.bin) <input type="file" id="fstm" accept=".bin"><button onclick="upload('stm32')">Flash STM32</button></div>
 <div class="row">ESP32 image (.bin) <input type="file" id="fesp" accept=".bin"><button onclick="upload('esp')">Update ESP32</button></div>
 <div class="row"><progress id="prog" max="100" value="0"></progress><span id="upd" class="mut"></span></div>
+<div class="row mut" id="updd" style="font-family:monospace;white-space:normal;word-break:break-all"></div>
 <div class="row"><button onclick="act('stm32/reset')">Restart STM32</button><button onclick="act('stm32/hardreset')">Hard reset STM32</button>
 <button onclick="if(confirm('Restart the ESP32?'))act('reboot')">Restart ESP32</button></div>
 <div class="row"><span id="prev" class="mut"></span><button id="rb" onclick="if(confirm('Start the previous ESP32 firmware (e.g. the legacy 1.x)?'))act('esp/rollback')">Start previous ESP32 firmware</button></div></section>
@@ -105,7 +106,7 @@ if(!formsDone){$('chans').innerHTML=s.valves.map(v=>`<label style="display:inlin
 if(!$('chans').contains(document.activeElement))s.valves.forEach(v=>{$('chans').querySelector(`[value="${v.ch}"]`).checked=v.mode!==0});
 formsDone=true;
 const p=s.esp.previous;$('prev').textContent=p?`Previous ESP32 firmware in the other slot: ${p.project} ${p.version} (${p.date})`:'No previous ESP32 firmware';$('rb').disabled=!p;
-const u=s.update;if(u.active||u.result){$('prog').value=u.percent;$('upd').textContent=`STM32 update: ${u.phase} ${u.percent}% ${u.result||''}`}
+const u=s.update;if(u.active||u.result){$('prog').value=u.percent;$('upd').textContent=`STM32 update: ${u.phase} ${u.percent}% ${u.result||''}`;$('updd').textContent=u.detail?('Bootloader entry: '+u.detail):''}
 const d=Object.assign({},s.link.stats,s.diag||{});$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
 $('log').innerHTML=s.log.slice().reverse().map(e=>`<tr><td class=mut>${(e.ms/1000).toFixed(0)} s</td><td>${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
 refresh();setInterval(refresh,2000);

@@ -3,6 +3,8 @@
  */
 #include "core/stm32_flasher.h"
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 namespace vdm
@@ -91,53 +93,76 @@ void Stm32Flasher::runApplication(BootPort &port)
     port.drain();
 }
 
+void Stm32Flasher::note(const char *fmt, ...)
+{
+    size_t used = strlen(trace_);
+    if (used + 1 >= sizeof(trace_)) {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(&trace_[used], sizeof(trace_) - used, fmt, ap);
+    va_end(ap);
+}
+
 bool Stm32Flasher::probeSync(BootPort &port)
 {
     port.drain();
     uint8_t b = kSync;
     port.write(&b, 1);
     int r = port.read(200);
+    if (r >= 0 && r != kAck && r != kNack) {
+        note("sync:%02X ", r);
+    }
     return r == kAck || r == kNack; /* NACK: already synchronised */
 }
 
-bool Stm32Flasher::softwareEntry(BootPort &port)
+bool Stm32Flasher::softwareEntry(BootPort &port, uint32_t settle_ms, uint32_t interval_ms,
+                                 int sends, uint32_t boot_ms)
 {
     static const char kRequest[] = "DEADBEEF\r\n";
     static const char kAnswer[] = "BEEFIT";
-    for (int attempt = 0; attempt < 2; attempt++) {
-        port.setBoot0(false);
-        port.begin(115200, true);
-        port.setReset(true);
-        port.delayMs(150);
-        port.setReset(false);
-        port.delayMs(300);
-        port.drain();
-        size_t match = 0;
-        /* the boot window of the application lasts about 2-3 s */
-        for (int i = 0; i < 10; i++) {
-            port.write(reinterpret_cast<const uint8_t *>(kRequest), sizeof(kRequest) - 1);
-            int c;
-            while ((c = port.read(250)) >= 0) {
-                match = c == kAnswer[match] ? match + 1 : (c == kAnswer[0] ? 1 : 0);
-                if (match == sizeof(kAnswer) - 1) {
-                    port.delayMs(300); /* bootloader start-up */
-                    for (int s = 0; s < 5; s++) {
-                        if (probeSync(port)) {
-                            return true;
-                        }
-                        port.delayMs(100);
+    port.setBoot0(false);
+    port.begin(115200, true);
+    port.setReset(true);
+    port.delayMs(150);
+    port.setReset(false);
+    port.delayMs(settle_ms);
+    port.drain();
+    size_t match = 0;
+    size_t received = 0;
+    /* the boot window of the application lasts 2 s (v2) or 3 s (legacy) */
+    for (int i = 0; i < sends; i++) {
+        port.write(reinterpret_cast<const uint8_t *>(kRequest), sizeof(kRequest) - 1);
+        int c;
+        while ((c = port.read(interval_ms)) >= 0) {
+            if (received < 12) {
+                note("%02X", c);
+            }
+            received++;
+            match = c == kAnswer[match] ? match + 1 : (c == kAnswer[0] ? 1 : 0);
+            if (match == sizeof(kAnswer) - 1) {
+                note(" BEEFIT ");
+                port.delayMs(boot_ms); /* bootloader start-up */
+                for (int s = 0; s < 5; s++) {
+                    if (probeSync(port)) {
+                        return true;
                     }
-                    return false;
+                    port.delayMs(200);
                 }
+                note("no sync; ");
+                return false;
             }
         }
     }
+    note(" rx %u bytes, no BEEFIT; ", static_cast<unsigned>(received));
     return false;
 }
 
 bool Stm32Flasher::boot0Entry(BootPort &port)
 {
     static const uint32_t kBauds[] = {115200, 57600};
+    note("boot0: ");
     for (uint32_t baud : kBauds) {
         for (int attempt = 0; attempt < 2; attempt++) {
             port.setBoot0(true);
@@ -153,14 +178,31 @@ bool Stm32Flasher::boot0Entry(BootPort &port)
         }
     }
     port.setBoot0(false);
+    note("no answer");
     return false;
 }
 
 bool Stm32Flasher::enterBootloader(BootPort &port)
 {
+    trace_[0] = '\0';
     port.setBoot0(false);
     port.begin(115200, true);
-    return probeSync(port) || softwareEntry(port) || boot0Entry(port);
+    note("probe: ");
+    if (probeSync(port)) {
+        note("bootloader active");
+        return true;
+    }
+    /* 1st: timing of the legacy 1.x ESP32 firmware (known to work on the
+     * boards), 2nd: faster timing */
+    note("sw1: ");
+    if (softwareEntry(port, 1500, 1000, 4, 1500)) {
+        return true;
+    }
+    note("sw2: ");
+    if (softwareEntry(port, 300, 250, 10, 500)) {
+        return true;
+    }
+    return boot0Entry(port);
 }
 
 bool Stm32Flasher::command(BootPort &port, uint8_t cmd, uint32_t timeout_ms)

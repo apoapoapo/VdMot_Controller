@@ -76,6 +76,11 @@ class Stm32Flasher
     {
         return chip_id_;
     }
+    /* What happened while entering the bootloader (for diagnostics). */
+    const char *trace() const
+    {
+        return trace_;
+    }
 
     /* Restarts the STM32 into its application (BOOT0 low, reset pulse). */
     static void runApplication(BootPort &port);
@@ -83,7 +88,9 @@ class Stm32Flasher
   private:
     bool enterBootloader(BootPort &port);
     bool probeSync(BootPort &port);
-    bool softwareEntry(BootPort &port);
+    bool softwareEntry(BootPort &port, uint32_t settle_ms, uint32_t interval_ms, int sends,
+                       uint32_t boot_ms);
+    void note(const char *fmt, ...);
     bool boot0Entry(BootPort &port);
     bool command(BootPort &port, uint8_t cmd, uint32_t timeout_ms = 1000);
     bool sendWithChecksum(BootPort &port, const uint8_t *data, size_t len, uint32_t timeout_ms);
@@ -93,6 +100,7 @@ class Stm32Flasher
     bool writeBlock(BootPort &port, uint32_t addr, const uint8_t *data, size_t len);
     bool readBlock(BootPort &port, uint32_t addr, uint8_t *data, size_t len);
 
+    char trace_[256] = {};
     uint16_t chip_id_ = 0;
     size_t flash_size_ = 0;
 };

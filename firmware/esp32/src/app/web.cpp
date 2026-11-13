@@ -247,6 +247,7 @@ void handleState()
     up["percent"] = u.percent;
     up["phase"] = u.phase;
     up["result"] = u.result;
+    up["detail"] = u.detail;
 
     JsonArray log = doc.createNestedArray("log");
     for (uint8_t i = 0; i < m.log_count; i++) {

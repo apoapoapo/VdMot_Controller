@@ -121,12 +121,15 @@ void flashStm32()
 
     vdm::FlashResult r = vdm::FlashResult::ReadFailed;
     uint16_t chip = 0;
+    static char detail[256];
+    detail[0] = '\0';
     File f = LittleFS.open(kStm32ImagePath, "r");
     if (f) {
         FileImage img(f);
         vdm::Stm32Flasher flasher;
         r = flasher.flash(boot_port, img, progress, nullptr);
         chip = flasher.chipId();
+        strlcpy(detail, flasher.trace(), sizeof(detail));
         f.close();
     }
     if (r == vdm::FlashResult::Ok) {
@@ -143,6 +146,7 @@ void flashStm32()
                                             : "unknown chip";
     snprintf(s.result, sizeof(s.result), "%s (%s, id 0x%03X)", vdm::flashResultName(r), chip_name,
              chip);
+    strlcpy(s.detail, detail, sizeof(s.detail));
     setUpdateStatus(s);
 
     uart.begin(115200, SERIAL_8N1, kPinStmRx, kPinStmTx);
