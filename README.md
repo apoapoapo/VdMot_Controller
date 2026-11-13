@@ -1,4 +1,19 @@
 # VdMot_Controller
+
+> **About this fork – firmware v2 in progress**
+>
+> This repository is a fork of the VdMot Controller by
+> [Lenti84](https://github.com/Lenti84/VdMot_Controller) and
+> [SurfGargano](https://github.com/SurfGargano/VdMot_Controller).
+> The firmware for both controllers is being rebuilt as **v2** (new
+> ESP32 ⇄ STM32 protocol, persistent calibration, reworked Home Assistant
+> integration). See [docs/refactoring/PLAN.md](./docs/refactoring/PLAN.md)
+> and [docs/protocol/stm32-esp32-link.md](./docs/protocol/stm32-esp32-link.md).
+>
+> - New code: `common/`, `firmware/` (work in progress, not usable yet)
+> - Legacy firmware 1.4.x: `software_stm32/`, `software_esp32/` (unchanged);
+>   binaries are available from the upstream releases.
+
 This is a controller for HmIP-VdMot actuators.
 
 It controls up to 12 HmIP-VdMot actuators or other DC motor valves and is based on custom hardware/software.

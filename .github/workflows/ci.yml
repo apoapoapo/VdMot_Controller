@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check formatting of v2 code
+        run: |
+          files=$(git ls-files 'common/*.c' 'common/*.h' 'firmware/*.c' 'firmware/*.h' 'firmware/*.cpp')
+          clang-format-18 --dry-run --Werror $files
+
+  host-tests:
+    name: Host tests (protocol)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-native-${{ hashFiles('common/protocol/platformio.ini') }}
+      - run: pip install platformio
+      - name: Run tests
+        working-directory: common/protocol
+        run: pio test -e native
+
+  build:
+    name: Build ${{ matrix.target }} (${{ matrix.env }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: stm32
+            env: f411_c2
+          - target: stm32
+            env: f401_c2
+          - target: esp32
+            env: wt32_eth01
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ matrix.target }}-${{ hashFiles(format('firmware/{0}/platformio.ini', matrix.target)) }}
+      - run: pip install platformio
+      - name: Build
+        working-directory: firmware/${{ matrix.target }}
+        run: pio run -e ${{ matrix.env }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.target }}-${{ matrix.env }}
+          path: firmware/${{ matrix.target }}/.pio/build/${{ matrix.env }}/firmware.bin
+          if-no-files-found: error

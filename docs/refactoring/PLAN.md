@@ -71,11 +71,13 @@ Open / later:
 
 ```
 common/
-  protocol/            shared protocol code (C99, no Arduino dependency)
-    vdm_link.h         message ids, structures, error codes
-    vdm_cobs.[ch]      COBS encode/decode
-    vdm_crc16.[ch]     CRC-16/CCITT-FALSE
-    vdm_codec.[ch]     message (de)serialization, little-endian, field by field
+  protocol/            shared protocol library (C99, no Arduino dependency)
+    include/vdm/link.h   message ids, structures, error codes, defaults
+    include/vdm/crc16.h  CRC-16/CCITT-FALSE
+    include/vdm/cobs.h   COBS encode/decode
+    include/vdm/frame.h  frame builder and stream receiver
+    include/vdm/codec.h  message (de)serialization, little-endian, field by field
+    test/                Unity host tests (pio test -e native)
 firmware/
   stm32/               new STM32 firmware (PlatformIO)
     src/hal/           pins, timers, ADC, pulse counter, EEPROM, 1-Wire (only place using Arduino/HAL)
@@ -105,11 +107,17 @@ are attached to GitHub releases (built by CI).
 
 ## 4. Phases
 
-### Phase 0 – Foundation
+### Phase 0 – Foundation (done)
 - Directory layout, `.gitignore`, `.editorconfig`, clang-format.
 - Protocol specification (this package) → review → implement `common/protocol`.
 - Host tests (PlatformIO `env:native` + Unity) for COBS, CRC, codec.
 - GitHub Actions: builds for STM32 (F411/F401) and ESP32, host tests.
+- Firmware skeletons (`firmware/stm32`, `firmware/esp32`) that link the
+  protocol library: the STM32 puts all motor outputs into a safe state and
+  answers `HELLO`/`PING`; the ESP32 sends `HELLO` once per second and prints
+  the answer. Usable as a first link test on the hardware.
+- Legacy release binaries removed from the repository (they remain in the
+  git history and in the upstream releases).
 
 ### Phase 1 – STM32 firmware (most critical part)
 - HAL layer; defined pin states immediately after reset (motors off, PSU off).

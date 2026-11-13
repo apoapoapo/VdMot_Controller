@@ -69,8 +69,8 @@ Decoded content:
 - The payload length follows from the decoded frame length (`len - 6`); there
   is no separate length field.
 - Maximum decoded frame length: **246 bytes**, encoded ≤ 248 bytes including `0x00`.
-- Frames shorter than 6 bytes, longer than 246 bytes, or with a COBS or CRC
-  error are **silently dropped**. Each error type has its own counter (see
+- Frames shorter than 6 bytes, longer than 246 bytes, with a COBS or CRC
+  error, an unknown `kind` or `seq` = 0 are **silently dropped**. Each error type has its own counter (see
   `GET_DIAG`). Corrupted frames are **never** answered, because their `seq`
   cannot be trusted.
 
@@ -433,7 +433,7 @@ Request: empty. Response:
 | `uptime_s` | u32 | |
 | `rx_frames_ok` | u32 | |
 | `rx_crc_err` | u16 | |
-| `rx_cobs_err` | u16 | |
+| `rx_malformed` | u16 | COBS error, bad length, unknown `kind` or `seq` = 0 |
 | `rx_overflow` | u16 | |
 | `rx_bad_version` | u16 | |
 | `rx_duplicate` | u16 | repetitions answered via 4.3 |
@@ -526,8 +526,9 @@ the baud rate.
   (`vdm_enc_set_targets()`, `vdm_dec_set_targets()`). The decoder validates
   length and ranges, not the caller.
 - No dynamic memory on the STM32, and no `String`s in the link path on the ESP32.
-- Test vectors (frames as hex) live in `common/protocol/test/vectors/` and are
-  used by both sides.
+- The examples of chapter 8 are part of the host tests
+  (`common/protocol/test/`), so the specification and the code cannot drift
+  apart unnoticed.
 
 ---
 
