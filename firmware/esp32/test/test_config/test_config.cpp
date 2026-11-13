@@ -53,6 +53,13 @@ struct FakeFs : vdm::FileSystem {
 vdm::Config cfg, cfg2;
 char err[128];
 
+std::string text(const vdm::Config &c, bool secrets)
+{
+    std::string t;
+    TEST_ASSERT_TRUE(vdm::ConfigStore::toText(c, secrets, false, t));
+    return t;
+}
+
 bool parse(const char *json, vdm::Config &out)
 {
     return vdm::ConfigStore::fromText(json, out, err, sizeof(err));
@@ -66,7 +73,7 @@ const char *kRoom = R"({
     {"id": "s2", "name": "Living", "type": "mqtt", "topic": "ha/living/temp", "field": "value"}
   ],
   "zones": [
-    {"id": "z1", "name": "Bathroom", "setpoint": 22.5, "control_source": "s1",
+    {"id": "z1", "name": "Bathroom", "setpoint": 22.5, "control_sources": ["s1"],
      "info_sources": ["s2"], "profile": "floor"}
   ],
   "valves": [{"name": "Bath 1", "zone": "z1", "min_pct": 10}, {"name": "Bath 2", "zone": "z1"}],
@@ -109,19 +116,19 @@ void test_round_trip()
     TEST_ASSERT_EQUAL(10, cfg.valves[0].min_pct);
     TEST_ASSERT_EQUAL_STRING("Channel 3", cfg.valves[2].name);
 
-    std::string text = vdm::ConfigStore::toText(cfg, true, false);
-    TEST_ASSERT_TRUE_MESSAGE(parse(text.c_str(), cfg2), err);
-    TEST_ASSERT_EQUAL_STRING(text.c_str(), vdm::ConfigStore::toText(cfg2, true, false).c_str());
+    std::string t = text(cfg, true);
+    TEST_ASSERT_TRUE_MESSAGE(parse(t.c_str(), cfg2), err);
+    TEST_ASSERT_EQUAL_STRING(t.c_str(), text(cfg2, true).c_str());
     TEST_ASSERT_EQUAL_STRING("secret", cfg2.device.web_pwd);
 }
 
 void test_secrets_are_hidden()
 {
     TEST_ASSERT_TRUE(parse(kRoom, cfg));
-    std::string text = vdm::ConfigStore::toText(cfg, false, false);
-    TEST_ASSERT_NULL(strstr(text.c_str(), "secret"));
-    TEST_ASSERT_NOT_NULL(strstr(text.c_str(), "\"web_pwd_set\":true"));
-    TEST_ASSERT_NOT_NULL(strstr(text.c_str(), "\"wifi_pwd_set\":false"));
+    std::string t = text(cfg, false);
+    TEST_ASSERT_NULL(strstr(t.c_str(), "secret"));
+    TEST_ASSERT_NOT_NULL(strstr(t.c_str(), "\"web_pwd_set\":true"));
+    TEST_ASSERT_NOT_NULL(strstr(t.c_str(), "\"wifi_pwd_set\":false"));
 }
 
 void test_validation()
@@ -133,12 +140,14 @@ void test_validation()
         {R"({"zones":[{"id":"z1","name":"A"}],"next_zone_id":1})", "next_zone_id"},
         {R"({"zones":[{"id":"z1","name":"A"},{"id":"z1","name":"B"}],"next_zone_id":5})",
          "used twice"},
+        {R"({"zones":[{"id":"z1","name":"A","control_sources":["s9"]}],"next_zone_id":2})",
+         "unknown control source"},
         {R"({"zones":[{"id":"z1","name":"A","control_source":"s9"}],"next_zone_id":2})",
          "unknown control source"},
+        {R"({"zones":[{"id":"z1","name":"A","control_sources":"s1"}],"next_zone_id":2})", "list"},
         {R"({"zones":[{"id":"z1","name":"A","setpoint":40}],"next_zone_id":2})", "setpoint"},
         {R"({"zones":[{"id":"x","name":"A"}],"next_zone_id":2})", "invalid"},
         {R"({"sources":[{"id":"s1","name":"A","rom":"28-FF"}],"next_source_id":2})", "ROM"},
-        {R"({"sources":[{"id":"s1","name":"A","type":"mqtt"}],"next_source_id":2})", "topic"},
         {R"({"sources":[{"id":"s1","name":"A","type":"knx"}],"next_source_id":2})", "type"},
         {R"({"valves":[{"zone":"z4"}]})", "unknown zone"},
         {R"({"valves":[{"min_pct":50,"max_pct":40}]})", "minimum"},
@@ -153,12 +162,14 @@ void test_validation()
         {R"({"device":)", "JSON"},
     };
     for (auto &c : cases) {
-        cfg.device.name[0] = 'X';
         bool ok = parse(c.json, cfg);
         TEST_ASSERT_FALSE_MESSAGE(ok, c.json);
         TEST_ASSERT_NOT_NULL_MESSAGE(strstr(err, c.expect), err);
-        TEST_ASSERT_EQUAL_CHAR('X', cfg.device.name[0]); /* untouched on failure */
     }
+    /* an MQTT source without a topic uses the default topic */
+    TEST_ASSERT_TRUE_MESSAGE(
+        parse(R"({"sources":[{"id":"s1","name":"A","type":"mqtt"}],"next_source_id":2})", cfg),
+        err);
 }
 
 void test_apply_section_merges_objects()
@@ -215,7 +226,7 @@ void test_apply_section_assigns_ids_and_drops_references()
     TEST_ASSERT_EQUAL(2, cfg2.source_count);
     TEST_ASSERT_EQUAL_STRING("s3", cfg2.sources[1].id);
     TEST_ASSERT_EQUAL(4, cfg2.next_source_id);
-    TEST_ASSERT_EQUAL_STRING("", cfg2.zones[0].control_source); /* was s1 */
+    TEST_ASSERT_EQUAL_STRING("", cfg2.zones[0].control_sources[0]); /* was s1 */
     TEST_ASSERT_EQUAL_STRING("s2", cfg2.zones[0].info_sources[0]);
 
     deserializeJson(in, R"([{"id":"z1","name":"Bathroom"},{"name":"Hall"},{"name":"Kitchen"}])");
@@ -261,7 +272,7 @@ void test_store_atomic_save_and_load()
 
     /* power loss between the renames: main file missing, tmp complete */
     fs.files.erase("/config.json");
-    fs.files["/config.json.tmp"] = vdm::ConfigStore::toText(cfg, true, false);
+    fs.files["/config.json.tmp"] = text(cfg, true);
     TEST_ASSERT_EQUAL(vdm::LoadResult::FromTemp, store.load(cfg2));
     TEST_ASSERT_EQUAL_STRING("Second", cfg2.device.name);
 
@@ -310,6 +321,24 @@ void test_helpers()
     TEST_ASSERT_EQUAL_STRING("vdmot", h);
 }
 
+void test_legacy_control_source_key()
+{
+    TEST_ASSERT_TRUE_MESSAGE(parse(R"({"sources":[{"id":"s1","name":"A","type":"mqtt"}],
+                  "zones":[{"id":"z1","name":"Z","control_source":"s1"}],
+                  "next_source_id":2,"next_zone_id":2})",
+                                   cfg),
+                             err);
+    TEST_ASSERT_EQUAL_STRING("s1", cfg.zones[0].control_sources[0]);
+    TEST_ASSERT_NOT_NULL(strstr(text(cfg, true).c_str(), "\"control_sources\":[\"s1\"]"));
+}
+
+void test_reset()
+{
+    TEST_ASSERT_TRUE(parse(kRoom, cfg));
+    cfg.reset();
+    TEST_ASSERT_EQUAL_STRING(text(vdm::Config(), true).c_str(), text(cfg, true).c_str());
+}
+
 void test_profiles()
 {
     vdm::ZoneConfig z;
@@ -335,6 +364,8 @@ int main()
     RUN_TEST(test_apply_section_assigns_ids_and_drops_references);
     RUN_TEST(test_store_atomic_save_and_load);
     RUN_TEST(test_helpers);
+    RUN_TEST(test_legacy_control_source_key);
+    RUN_TEST(test_reset);
     RUN_TEST(test_profiles);
     return UNITY_END();
 }

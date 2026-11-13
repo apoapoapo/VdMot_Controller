@@ -3,14 +3,15 @@
  *
  * Saving is atomic: the new document is written to "<path>.tmp" and read
  * back, the current file becomes "<path>.bak", then the temporary file is
- * renamed. Loading tries the file, the temporary file (power loss between
- * the renames) and the backup, in this order; if none is valid the
- * defaults are used.
+ * renamed. Nothing is written unless the new document reads back as a valid
+ * configuration that serializes to the same text. Loading tries the file, the temporary file (power
+ * loss between the renames) and the backup, in this order; if none is valid the defaults are used.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include "core/config.h"
@@ -47,9 +48,10 @@ class ConfigStore
     LoadResult load(Config &out);
     bool save(const Config &c);
 
-    /* serializes the configuration (pretty printed for export) */
-    static std::string toText(const Config &c, bool secrets, bool pretty);
-    /* parses a document, e.g. an import; `out` is only changed on success */
+    /* serializes the configuration (pretty printed for export); false if
+     * memory is short (`out` is then empty) */
+    static bool toText(const Config &c, bool secrets, bool pretty, std::string &out);
+    /* parses a document, e.g. an import; on failure `out` must not be used */
     static bool fromText(const std::string &text, Config &out, char *err, size_t err_len);
 
     /* reason why the last load() did not use the main file, empty if it did */

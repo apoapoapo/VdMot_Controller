@@ -132,6 +132,12 @@ class ControlEngine
 
     /* 1-Wire values and valve states from the link model */
     void updateFromModel(const Model &m, uint32_t now_ms);
+    /* base topic for MQTT sources without their own topic: they listen on
+     * <base>/source/<id>/set */
+    void setMqttBase(const char *base);
+    /* topic of MQTT source `i` (its own or the default one) */
+    const char *mqttTopic(uint8_t i, char *buf, size_t len) const;
+
     /* value of an MQTT source; true if the topic belongs to a source */
     bool onMqtt(const char *topic, const char *payload, size_t len, uint32_t now_ms);
 
@@ -190,6 +196,7 @@ class ControlEngine
     uint16_t fill(uint16_t deficit, bool priority);
 
     const Config *cfg_ = nullptr;
+    char mqtt_base_[96] = "vdmot";
     uint32_t start_ms_ = 0;
     bool started_ = false;
 

@@ -310,6 +310,43 @@ void test_mqtt_payloads()
     TEST_ASSERT_FALSE(eng->onMqtt("other", "1", 1, now));
 }
 
+void test_mqtt_default_topic()
+{
+    start(R"({"sources": [{"id": "s4", "name": "A", "type": "mqtt"}], "next_source_id": 5})");
+    eng->setMqttBase("vdmot/vdmot-a1b2c3");
+    char b[96];
+    TEST_ASSERT_EQUAL_STRING("vdmot/vdmot-a1b2c3/source/s4/set", eng->mqttTopic(0, b, sizeof(b)));
+    mqtt("vdmot/vdmot-a1b2c3/source/s4/set", "19.5");
+    run(1000);
+    TEST_ASSERT_EQUAL(SourceState::Ok, eng->source(0).state);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 19.5f, eng->source(0).value);
+}
+
+void test_mean_of_control_sources()
+{
+    start(R"({
+      "sources": [{"id": "s1", "name": "A", "type": "mqtt", "topic": "a", "max_age_s": 60},
+                  {"id": "s2", "name": "B", "type": "mqtt", "topic": "b", "max_age_s": 600}],
+      "zones": [{"id": "z1", "name": "Attic", "control_sources": ["s1", "s2"]}],
+      "valves": [{"zone": "z1"}],
+      "next_source_id": 3, "next_zone_id": 2})");
+    mqtt("a", "20.0");
+    run(1000);
+    TEST_ASSERT_EQUAL(SourceState::Ok, eng->zone(0).source);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 20.0f, eng->zone(0).temperature); /* only A so far */
+    mqtt("b", "21.0");
+    run(1000);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 20.5f, eng->zone(0).temperature);
+    run(61000); /* A stale: B alone */
+    mqtt("b", "21.0");
+    run(1000);
+    TEST_ASSERT_EQUAL(SourceState::Ok, eng->zone(0).source);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 21.0f, eng->zone(0).temperature);
+    run(600000); /* both stale */
+    TEST_ASSERT_EQUAL(SourceState::Stale, eng->zone(0).source);
+    TEST_ASSERT_EQUAL(ZoneAction::Fallback, eng->zone(0).action);
+}
+
 void test_reconfigure_keeps_state()
 {
     start(kOneRoom);
@@ -345,7 +382,7 @@ void test_factor_and_limits()
 {
     start(R"({
       "sources": [{"id": "s1", "name": "Room", "type": "mqtt", "topic": "room/t"}],
-      "zones": [{"id": "z1", "name": "Bath", "setpoint": 21, "control_source": "s1"}],
+      "zones": [{"id": "z1", "name": "Bath", "setpoint": 21, "control_sources": ["s1"]}],
       "valves": [{"zone": "z1"}, {"zone": "z1", "factor_pct": 50}, {"zone": "z1", "max_pct": 30}],
       "next_source_id": 2, "next_zone_id": 2})");
     stmReady(800);
@@ -491,6 +528,8 @@ int main()
     RUN_TEST(test_stale_source_and_recovery);
     RUN_TEST(test_onewire_source_from_model);
     RUN_TEST(test_mqtt_payloads);
+    RUN_TEST(test_mqtt_default_topic);
+    RUN_TEST(test_mean_of_control_sources);
     RUN_TEST(test_reconfigure_keeps_state);
     RUN_TEST(test_heating_off_goes_to_min_position);
     RUN_TEST(test_factor_and_limits);

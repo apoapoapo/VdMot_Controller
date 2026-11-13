@@ -83,7 +83,7 @@ Each source has:
 |---|---|
 | `id` | stable key (`s1`, `s2`, …), assigned by the ESP32, never reused |
 | `name` | display name, e.g. "Bathroom", "Supply", "Bathroom return" |
-| `type` | `onewire` (ROM id), `mqtt` (topic, optional JSON field), later `knx` (group address) |
+| `type` | `onewire` (ROM id), `mqtt` (topic, optional JSON field), later `knx` (group address). An MQTT source without a topic listens on `<base>/source/<id>/set`. |
 | `offset` | correction in K |
 | `max_age_s` | after this time without a new value the source counts as **stale**; 0 = never stale |
 
@@ -120,10 +120,10 @@ for that source.
 | `mode` | `control`: the ESP32 controller sets the valves. `manual`: the valve positions come from outside (web, HA, KNX). |
 | `setpoint` | target temperature in °C (5…30), stored, can be changed via web, HA or KNX |
 | `heating` | on/off (HA climate `heat`/`off`). Off: the valves go to their minimum position. |
-| `control_source` | the temperature source used for control |
+| `control_sources` | up to 4 temperature sources used for control; the zone temperature is the mean of the valid ones (e.g. one room with two sensors) |
 | `info_sources[]` | further sources shown with the zone, e.g. the return temperature of each circuit |
 | `profile` | controller parameters: `floor` (floor heating), `radiator` or `custom` (see 4.4) |
-| `fallback` | position used while `control_source` is stale; default: the global fallback position |
+| `fallback` | position used while none of the `control_sources` is valid; default: the global fallback position |
 
 ### 4.2 Valves of a zone
 
@@ -156,7 +156,7 @@ A PI controller per zone in `control` mode.
   output is saturated in the direction of the error.
 - **Bumpless switching** from `manual` to `control`: the integral starts
   from the current valve position.
-- **Stale `control_source`:** the controller holds its state and the zone
+- **No valid control source:** the controller holds its state and the zone
   goes to its fallback position. The fallback is a valve position: the
   factor is not applied, the limits are. A diagnostic flag is set and a log
   entry written. When values arrive again, control resumes; the first
@@ -215,7 +215,7 @@ position to the STM32 as `failsafe_pos`, so both use the same value.
 
 ```
 for every zone:
-    control mode : output = PI(setpoint, control_source)  or  fallback if stale
+    control mode : output = PI(setpoint, mean of the valid control_sources)  or  fallback if stale
                    heating off → output = 0 (→ min_pos)
     manual mode  : per valve the last external target
 for every valve:  target = clamp(output × factor, min_pos, max_pos)

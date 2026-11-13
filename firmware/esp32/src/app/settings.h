@@ -22,8 +22,8 @@ void settingsLoop();
 
 const vdm::Config &config();
 
-/* Replaces the configuration, saves it and reconfigures the controller.
- * Returns false if saving failed (the new configuration is still active). */
+/* Saves the configuration and, if that worked, makes it the active one and
+ * reconfigures the controller. Returns false (nothing changed) otherwise. */
 bool settingsCommit(const vdm::Config &c);
 
 /* Small runtime changes (setpoint, mode, heating): saved after a short
@@ -36,5 +36,10 @@ const char *settingsLoadInfo();
 
 /* host name derived from the device name */
 const char *hostname();
+
+/* MQTT client id (configured or "vdmot-" + the last 3 MAC bytes) and the
+ * base topic (configured or "vdmot/<client id>") */
+void mqttClientId(char *out, size_t len);
+void mqttBaseTopic(char *out, size_t len);
 
 } // namespace app

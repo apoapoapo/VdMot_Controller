@@ -145,14 +145,23 @@ void evaluate(uint32_t now)
 
 } // namespace
 
+static void setBase()
+{
+    char base[96];
+    mqttBaseTopic(base, sizeof(base));
+    g_engine.setMqttBase(base);
+}
+
 void controlBegin()
 {
+    setBase();
     g_engine.configure(config(), millis());
     restoreRtc();
 }
 
 void controlReconfigure()
 {
+    setBase();
     g_engine.configure(config(), millis());
     g_kick = true;
 }

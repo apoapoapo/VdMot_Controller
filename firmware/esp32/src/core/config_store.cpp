@@ -31,23 +31,32 @@ ConfigStore::ConfigStore(FileSystem &fs, const char *path)
 {
 }
 
-std::string ConfigStore::toText(const Config &c, bool secrets, bool pretty)
+bool ConfigStore::toText(const Config &c, bool secrets, bool pretty, std::string &out)
 {
-    static DynamicJsonDocument doc(kConfigJsonCapacity);
-    doc.clear();
+    out.clear();
+    DynamicJsonDocument doc(kConfigJsonCapacity);
+    if (doc.capacity() == 0) {
+        return false;
+    }
     configToJson(c, doc.to<JsonObject>(), secrets);
-    std::string out;
+    if (doc.overflowed()) {
+        return false;
+    }
     if (pretty) {
         serializeJsonPretty(doc, out);
     } else {
         serializeJson(doc, out);
     }
-    return out;
+    return !out.empty();
 }
 
 bool ConfigStore::fromText(const std::string &text, Config &out, char *err, size_t err_len)
 {
-    static DynamicJsonDocument doc(kConfigJsonCapacity);
+    DynamicJsonDocument doc(kConfigJsonCapacity);
+    if (doc.capacity() == 0) {
+        snprintf(err, err_len, "out of memory");
+        return false;
+    }
     DeserializationError e = deserializeJson(doc, text);
     if (e) {
         snprintf(err, err_len, "invalid JSON: %s", e.c_str());
@@ -91,13 +100,26 @@ LoadResult ConfigStore::load(Config &out)
     if (tryLoad(bak_.c_str(), out)) {
         return LoadResult::FromBackup;
     }
-    out = configDefaults();
+    out.reset();
     return any ? LoadResult::Invalid : LoadResult::Defaults;
 }
 
 bool ConfigStore::save(const Config &c)
 {
-    std::string text = toText(c, true, false);
+    std::string text;
+    if (!toText(c, true, false, text)) {
+        return false;
+    }
+    {
+        /* the document must read back to the same configuration */
+        std::unique_ptr<Config> check(new Config());
+        char e[80];
+        std::string again;
+        if (!fromText(text, *check, e, sizeof(e)) || !toText(*check, true, false, again) ||
+            again != text) {
+            return false;
+        }
+    }
     if (!fs_.write(tmp_.c_str(), text)) {
         return false;
     }

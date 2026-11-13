@@ -26,6 +26,7 @@ constexpr uint16_t kConfigVersion = 1;
 constexpr uint8_t kMaxSources = 32;
 constexpr uint8_t kMaxZones = VDM_MAX_CHANNELS;
 constexpr uint8_t kMaxInfoSources = 4;
+constexpr uint8_t kMaxControlSources = 4;
 constexpr size_t kIdSize = 8;    /* "s123" + NUL */
 constexpr size_t kNameSize = 33; /* 32 characters */
 
@@ -73,7 +74,7 @@ struct SourceConfig {
     char name[kNameSize] = "";
     SourceType type = SourceType::OneWire;
     char rom[24] = "";    /* 1-Wire: "28-FF-..." */
-    char topic[128] = ""; /* MQTT */
+    char topic[128] = ""; /* MQTT, empty: <base topic>/source/<id>/set */
     char field[32] = "";  /* MQTT: JSON field, empty = plain number */
     float offset = 0.0f;  /* K */
     uint32_t max_age_s = 300;
@@ -85,7 +86,8 @@ struct ZoneConfig {
     ZoneMode mode = ZoneMode::Control;
     float setpoint = 20.0f;
     bool heating = true;
-    char control_source[kIdSize] = "";
+    /* the zone temperature is the mean of the valid control sources */
+    char control_sources[kMaxControlSources][kIdSize] = {};
     char info_sources[kMaxInfoSources][kIdSize] = {};
     Profile profile = Profile::Radiator;
     float xp = 1.5f;          /* proportional band in K (profile custom) */
@@ -118,14 +120,12 @@ struct Config {
     uint16_t next_zone_id = 1;
 
     Config();
+    /* back to the defaults, in place (Config is too large for temporaries) */
+    void reset();
 
     int sourceIndex(const char *id) const;
     int zoneIndex(const char *id) const;
 };
-
-/* The defaults. Config is large (~10 kB): keep instances off the stack and
- * preferably on the heap. */
-const Config &configDefaults();
 
 /* Effective controller parameters of a zone (profile or custom values). */
 struct PiParams {
@@ -135,15 +135,17 @@ struct PiParams {
 };
 PiParams piParams(const ZoneConfig &z);
 
-/* Size of a JsonDocument that holds any configuration. */
+/* Size of a JsonDocument that holds any configuration. Documents of this
+ * size are only allocated temporarily (heap). */
 constexpr size_t kConfigJsonCapacity = 24576;
 
 /* Writes the configuration into `obj`. Without `secrets` the passwords are
  * left out and replaced by "<field>_set": true/false. */
 void configToJson(const Config &c, JsonObject obj, bool secrets);
 
-/* Reads and validates a configuration. `out` is only changed on success.
- * `err` receives a short English message on failure. */
+/* Reads and validates a configuration into `out` (reset to the defaults
+ * first). On failure `out` holds an incomplete configuration and must not
+ * be used; `err` receives a short English message. */
 bool configFromJson(JsonObjectConst obj, Config &out, char *err, size_t err_len);
 
 /* Validates the cross references and value ranges of a configuration. */
@@ -154,6 +156,7 @@ bool configValidate(const Config &c, char *err, size_t err_len);
  * sent (e.g. passwords) keep their value; array sections (sources, zones,
  * valves) are replaced. New sources and zones (without "id") get the next
  * free id; references to removed sources or zones are cleared. */
+/* `base` and `out` must be different objects. */
 bool configApplySection(const Config &base, const char *name, JsonVariantConst section, Config &out,
                         char *err, size_t err_len);
 

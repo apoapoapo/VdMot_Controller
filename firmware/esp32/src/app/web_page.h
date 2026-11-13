@@ -28,7 +28,11 @@ table{border-collapse:collapse;width:100%}td,th{padding:4px 6px;border-bottom:1p
 th{color:var(--mut);font-weight:500}.num{text-align:right;font-variant-numeric:tabular-nums}
 .pill{padding:2px 8px;border-radius:10px;border:1px solid var(--line)}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
 input[type=number]{width:70px}input,button,select{font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--fg)}
-input.w{width:180px}input.s{width:110px}select[multiple]{vertical-align:middle}
+input.w{width:220px}input.s{width:110px}input.n{width:170px}
+ul.help{margin:0 0 8px;padding-left:18px;color:var(--mut)}ul.help li{margin:2px 0}
+.tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:160px;max-width:300px}
+.tag{border:1px solid var(--line);border-radius:10px;padding:1px 4px 1px 8px;white-space:nowrap}
+.tag b{cursor:pointer;padding:0 4px;color:var(--mut)}.tag b:hover{color:var(--bad)}.tags select{padding:1px 4px}
 button{cursor:pointer}button.p{background:var(--acc);color:#fff;border-color:var(--acc)}button:disabled,input:disabled{opacity:.45;cursor:default}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}.mut{color:var(--mut)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 16px}
@@ -58,25 +62,37 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 
 <div class="tab" id="tab-rooms">
 <section><h2>Zones</h2>
-<p class="mut">A zone is a room or heating circuit with one controller. Valves are assigned below. Mode <i>control</i>: the ESP32 controls the valves from the temperature; <i>manual</i>: the valve positions are set from outside (web, Home Assistant).
-Profiles: floor (Xp 2 K, Ti 3600 s, sample 300 s), radiator (Xp 1.5 K, Ti 900 s, sample 60 s), custom. Fallback: position while the temperature is missing (empty = global).</p>
+<ul class="help"><li>A zone is a room or heating circuit with one controller; the valves are assigned below.</li>
+<li>Mode <i>control</i>: the ESP32 controls the valves from the temperature. <i>manual</i>: the valve positions are set from outside (web, Home Assistant).</li>
+<li>Control temperature: one or more sources; with several, the mean of the valid ones is used. Further temperatures are only shown with the zone (e.g. return temperatures).</li>
+<li>Profiles: floor (Xp 2 K, Ti 3600 s, sample 300 s), radiator (Xp 1.5 K, Ti 900 s, sample 60 s), custom.</li>
+<li>Fallback: valve position while no control temperature is valid (empty = global setting).</li></ul>
 <table><thead><tr><th>Name</th><th>Mode</th><th>Setpoint</th><th>Heating</th><th>Control temperature</th><th>Further temperatures</th><th>Profile</th>
 <th>Xp K</th><th>Ti s</th><th>Sample s</th><th>Fallback %</th><th></th></tr></thead><tbody id="ezones"></tbody></table>
 <div class="row"><button onclick="addZone()">Add zone</button><button class="p" onclick="saveZones()">Save zones</button></div></section>
 <section><h2>Valves</h2>
-<p class="mut">Without a zone a valve is set directly. Min/max limit every target (min = minimum opening, also with heating off). The factor scales the zone output (hydraulic balancing). Flow priority: preferred valves for the minimum total opening.</p>
+<ul class="help"><li>Without a zone a valve is set directly (overview).</li>
+<li>Min/max limit every target; min is the minimum opening, also with heating off.</li>
+<li>Factor scales the zone output (simple hydraulic balancing between the circuits of a zone).</li>
+<li>Flow priority: valves opened first to reach the minimum total opening (Settings).</li></ul>
 <table><thead><tr><th>#</th><th>Name</th><th>Zone</th><th>Min %</th><th>Max %</th><th>Factor %</th><th>Flow priority</th></tr></thead><tbody id="evalves"></tbody></table>
 <div class="row"><button class="p" onclick="saveValves()">Save valves</button></div></section>
 <section><h2>Temperature sources</h2>
-<p class="mut">Max age: after this time without a new value the source counts as stale and the zone goes to its fallback position (0 = never). MQTT sources need a publisher that sends regularly; MQTT itself follows with the Home Assistant integration.</p>
-<table><thead><tr><th>Name</th><th>Type</th><th>ROM id / MQTT topic</th><th>JSON field</th><th>Offset K</th><th>Max age s</th><th class="num">Value °C</th><th>State</th><th></th></tr></thead><tbody id="esources"></tbody></table>
+<ul class="help"><li>1-Wire sensors found on the bus are offered below the table.</li>
+<li>MQTT topic: the topic the value is published on, e.g. by Home Assistant or zigbee2mqtt. Empty = the default topic shown in grey, to which e.g. a Home Assistant automation can publish.</li>
+<li>JSON field: only if the payload is JSON, e.g. <code>{"temperature":21.5,"humidity":40}</code> → <code>temperature</code>; nested fields with a dot (<code>sensor.temp</code>). Empty = the payload is a plain number.</li>
+<li>Offset: correction added to the value.</li>
+<li>Max age: after this time without a new value the source counts as stale; zones using it go to their fallback position (0 = never). Publishers that only send on change need a regular resend.</li>
+<li>MQTT values are received once the MQTT integration is in place (next firmware step).</li></ul>
+<table><thead><tr><th>Name</th><th>Type</th><th>ROM id / MQTT topic</th><th>JSON field</th><th>Offset K</th><th>Max age s</th><th class="num">Value °C</th><th>State</th><th>Used by</th><th></th></tr></thead><tbody id="esources"></tbody></table>
 <div class="row"><button onclick="addSource('mqtt')">Add MQTT source</button><button class="p" onclick="saveSources()">Save sources</button></div>
 <div class="row mut" id="unused"></div></section>
 </div>
 
 <div class="tab" id="tab-set">
 <section><h2>Flow guard and fallback</h2><div class="grid" id="f-flow"></div>
-<p class="mut">The fallback position is used while a zone has no valid temperature and is also written to the STM32 as its failsafe position (ESP32 gone). The minimum total opening is the minimum sum of all valve positions in percentage points (150 = one and a half open valves, 0 = off); it is reached by opening flow priority valves first.</p>
+<ul class="help"><li>Fallback position: used while a zone has no valid temperature; also written to the STM32 as its failsafe position (ESP32 gone).</li>
+<li>Minimum total opening: minimum sum of all valve positions in percentage points (150 = one and a half open valves, 0 = off). Flow priority valves are opened first; valves with a fault do not count.</li></ul>
 <div class="row"><button class="p" onclick="saveForm('flow')">Save</button></div></section>
 <section><h2>Device</h2><div class="grid" id="f-device"></div>
 <div class="row"><button class="p" onclick="saveForm('device')">Save</button><span class="mut">The name is also the host name. Leave a password empty to keep it.</span></div></section>
@@ -184,41 +200,49 @@ async function saveSection(sec,data,msg){const j=await req('config?section='+sec
 if(!j.ok){alert(j.error||'failed');return false}toast(msg);await loadCfg();refresh();
 if(j.restart&&confirm('Restart the ESP32 now to apply the change?'))post('reboot');return true}
 const ED={zones:[],sources:[]};
-function srcName(id){const s=CFG.sources.find(x=>x.id===id);return s?s.name:id}
-function srcOptions(sel,none){return (none?opt('','– none –',!sel):'')+ED.sources.filter(s=>s.id).map(s=>opt(s.id,s.name,s.id===sel)).join('')}
+const srcLabel=s=>`${s.name} (${s.type==='mqtt'?'MQTT':'1-Wire'})`;
+/* source lists as tags: chosen sources with ×, plus a drop-down to add one */
+function tagsHtml(ids,max){const src=ED.sources.filter(s=>s.id);
+const chips=ids.map(id=>{const s=src.find(x=>x.id===id);return `<span class=tag>${esc(s?srcLabel(s):id)}<b title=remove onclick="tagDel(this,'${id}')">×</b></span>`}).join('');
+const free=src.filter(s=>!ids.includes(s.id));
+return chips+(ids.length<max&&free.length?`<select onchange="tagAdd(this)">${opt('','+ add',true)}${free.map(s=>opt(s.id,srcLabel(s))).join('')}</select>`:'')+(ids.length?'':'<span class=mut>none</span>')}
+function tagSet(el,ids){el.dataset.v=JSON.stringify(ids);el.innerHTML=tagsHtml(ids,+el.dataset.max)}
+function tagAdd(sel){const el=sel.closest('.tags');const ids=JSON.parse(el.dataset.v);if(sel.value)ids.push(sel.value);tagSet(el,ids)}
+function tagDel(b,id){const el=b.closest('.tags');tagSet(el,JSON.parse(el.dataset.v).filter(x=>x!==id))}
+const tags=(k,ids,max)=>`<div class=tags data-k=${k} data-max=${max} data-v='${esc(JSON.stringify(ids||[]))}'>${tagsHtml(ids||[],max)}</div>`;
+function usedBy(id){const u=[];ED.zones.forEach(z=>{if((z.control_sources||[]).includes(id))u.push(z.name);if((z.info_sources||[]).includes(id))u.push(z.name+' (info)')});return u.join(', ')}
 const PROF={floor:{xp:2,ti_s:3600,sample_s:300},radiator:{xp:1.5,ti_s:900,sample_s:60}};
 function renderZones(){$('ezones').innerHTML=ED.zones.map((z,i)=>{const c=z.profile==='custom'?'':' disabled';const q=PROF[z.profile]||z;return `<tr data-i=${i}>
-<td><input class=s data-k=name value="${esc(z.name)}"></td>
+<td><input class=n data-k=name value="${esc(z.name)}"></td>
 <td><select data-k=mode>${opt('control','control',z.mode==='control')}${opt('manual','manual',z.mode==='manual')}</select></td>
 <td><input type=number data-k=setpoint min=5 max=30 step=0.5 value=${z.setpoint}></td>
 <td><input type=checkbox data-k=heating${z.heating?' checked':''}></td>
-<td><select data-k=control_source>${srcOptions(z.control_source,true)}</select></td>
-<td><select multiple size=2 data-k=info_sources>${ED.sources.filter(s=>s.id).map(s=>opt(s.id,s.name,(z.info_sources||[]).includes(s.id))).join('')}</select></td>
+<td>${tags('control_sources',z.control_sources,4)}</td><td>${tags('info_sources',z.info_sources,4)}</td>
 <td><select data-k=profile onchange="collectZones();renderZones()">${['floor','radiator','custom'].map(p=>opt(p,p,z.profile===p)).join('')}</select></td>
 <td><input type=number data-k=xp min=0.2 max=20 step=0.1 value=${q.xp}${c}></td><td><input type=number data-k=ti_s min=0 value=${q.ti_s}${c}></td>
 <td><input type=number data-k=sample_s min=10 value=${q.sample_s}${c}></td>
 <td><input type=number data-k=fallback_pct min=0 max=100 value="${z.fallback_pct<0?'':z.fallback_pct}" placeholder=global></td>
 <td><button onclick="collectZones();ED.zones.splice(${i},1);renderZones()">Delete</button></td></tr>`}).join('')||'<tr><td colspan=12 class=mut>No zones</td></tr>'}
 function rowVals(tr){const o={};tr.querySelectorAll('[data-k]').forEach(e=>{const k=e.dataset.k;
-if(e.type==='checkbox')o[k]=e.checked;else if(e.multiple)o[k]=[...e.selectedOptions].map(x=>x.value);
+if(e.classList.contains('tags'))o[k]=JSON.parse(e.dataset.v);else if(e.type==='checkbox')o[k]=e.checked;
 else if(e.type==='number')o[k]=e.value===''?null:Number(e.value);else o[k]=e.value});return o}
 function collectZones(){document.querySelectorAll('#ezones tr[data-i]').forEach(tr=>{const z=ED.zones[tr.dataset.i];Object.assign(z,rowVals(tr));if(z.fallback_pct===null)z.fallback_pct=-1})}
-function addZone(){collectZones();ED.zones.push({name:'Zone '+(ED.zones.length+1),mode:'control',setpoint:20,heating:true,control_source:'',info_sources:[],profile:'radiator',xp:1.5,ti_s:900,sample_s:60,fallback_pct:-1});renderZones()}
+function addZone(){collectZones();ED.zones.push({name:'Zone '+(ED.zones.length+1),mode:'control',setpoint:20,heating:true,control_sources:[],info_sources:[],profile:'radiator',xp:1.5,ti_s:900,sample_s:60,fallback_pct:-1});renderZones()}
 function saveZones(){collectZones();saveSection('zones',ED.zones,'Zones saved')}
 function renderValves(){$('evalves').innerHTML=CFG.valves.map((v,i)=>`<tr data-i=${i}><td>${i+1}</td>
-<td><input class=s data-k=name value="${esc(v.name)}"></td>
+<td><input class=n data-k=name value="${esc(v.name)}"></td>
 <td><select data-k=zone>${opt('','– none –',!v.zone)}${CFG.zones.map(z=>opt(z.id,z.name,z.id===v.zone)).join('')}</select></td>
 <td><input type=number data-k=min_pct min=0 max=100 value=${v.min_pct}></td><td><input type=number data-k=max_pct min=0 max=100 value=${v.max_pct}></td>
 <td><input type=number data-k=factor_pct min=10 max=250 value=${v.factor_pct}></td><td><input type=checkbox data-k=flow_priority${v.flow_priority?' checked':''}></td></tr>`).join('')}
 function saveValves(){const a=[...document.querySelectorAll('#evalves tr[data-i]')].map(rowVals);saveSection('valves',a,'Valves saved')}
 function renderSources(){$('esources').innerHTML=ED.sources.map((s,i)=>{const m=s.type==='mqtt';return `<tr data-i=${i}>
-<td><input class=s data-k=name value="${esc(s.name)}"></td><td>${m?'MQTT':'1-Wire'}</td>
-<td>${m?`<input class=w data-k=topic value="${esc(s.topic)}">`:esc(s.rom)}</td>
+<td><input class=n data-k=name value="${esc(s.name)}"></td><td>${m?'MQTT':'1-Wire'}</td>
+<td>${m?`<input class=w data-k=topic value="${esc(s.topic)}" placeholder="${esc((CFG.mqtt_base||'vdmot/…')+'/source/'+(s.id||'<id>')+'/set')}">`:esc(s.rom)}</td>
 <td>${m?`<input class=s data-k=field value="${esc(s.field)}" placeholder="plain number">`:''}</td>
 <td><input type=number data-k=offset min=-10 max=10 step=0.1 value=${s.offset}></td>
 <td><input type=number data-k=max_age_s min=0 value=${s.max_age_s}></td>
-<td class=num id="sv_${esc(s.id)}"></td><td id="ss_${esc(s.id)}" class=mut>${s.id?'':'not saved'}</td>
-<td><button onclick="collectSources();ED.sources.splice(${i},1);renderSources()">Delete</button></td></tr>`}).join('')||'<tr><td colspan=9 class=mut>No sources</td></tr>';renderUnused()}
+<td class=num id="sv_${esc(s.id)}"></td><td id="ss_${esc(s.id)}" class=mut>${s.id?'':'not saved'}</td><td class=mut>${esc(s.id?usedBy(s.id):'')}</td>
+<td><button onclick="collectSources();ED.sources.splice(${i},1);renderSources()">Delete</button></td></tr>`}).join('')||'<tr><td colspan=10 class=mut>No sources</td></tr>';renderUnused()}
 function collectSources(){document.querySelectorAll('#esources tr[data-i]').forEach(tr=>Object.assign(ED.sources[tr.dataset.i],rowVals(tr)))}
 function addSource(type,rom){collectSources();ED.sources.push(type==='mqtt'?{name:'MQTT '+(ED.sources.length+1),type,topic:'',field:'',offset:0,max_age_s:3600}
 :{name:'Sensor '+rom.slice(-5),type,rom,offset:0,max_age_s:300});renderSources()}
@@ -254,7 +278,10 @@ sp.disabled=z.mode!=='control';c[5].textContent=z.output===undefined?'–':z.out
 c[6].textContent=ACTIONS[z.action]||z.action;c[6].className=z.action==='fallback'?'warn':(z.action==='heating'?'ok':'mut')});
 const f=s.ctl.flow;$('flow').innerHTML=f.min_total?`Flow guard: total ${pct(f.total)} % of at least ${pct(f.min_total)} %`+
 (f.active?` – <b class=warn>active, +${pct(f.added)} % added</b>`:' – not needed')+(f.insufficient?' – <b class=bad>minimum cannot be reached</b>':''):'<span class=mut>Flow guard off (minimum total opening 0)</span>'}
-async function refresh(){let s;try{s=await (await fetch('/api/state')).json()}catch(e){$('link').textContent='ESP32 not reachable';$('link').className='pill bad';return}
+async function refresh(){let s;try{const r=await fetch('/api/state');s=await r.json();if(!r.ok)throw new Error(s.error||'HTTP '+r.status)}
+catch(e){$('link').textContent='ESP32 not reachable';$('link').className='pill bad';$('err').textContent=e.message||'';return}
+try{render(s)}catch(e){$('err').textContent='page error: '+e.message;console.error(e)}}
+function render(s){
 const l=s.link;$('link').textContent='STM32 '+l.state+(l.paused_s?` (link paused, ${l.paused_s} s)`:'');$('link').className='pill '+(l.state==='connected'?'ok':'bad');
 $('ver').textContent='ESP32 '+s.esp.version+(s.stm?(' · STM32 '+s.stm.version+' ('+s.stm.mcu+', '+s.stm.hw+') · boot #'+s.stm.boot_count+', last reset: '+(RESETS[s.stm.reset_cause]||s.stm.reset_cause)+', up '+dur(s.diag&&s.diag.stm_uptime_s)):'');
 $('net').textContent=s.net.interface+' '+s.net.ip+(s.net.ap?(' · AP '+s.net.ap_ssid):'')+(s.net.time?' · '+s.net.time:'');$('err').textContent=s.error||'';
@@ -289,7 +316,7 @@ const p=s.esp.previous;$('prev').textContent=p?`Previous ESP32 firmware in the o
 const u=s.update;if(!espUpload&&(u.active||u.result)){$('prog').value=u.percent;$('upd').textContent=u.active?`STM32 update: ${u.phase} ${u.percent}%`:`Last STM32 update: ${u.result||u.phase}`;
 const ask=u.active&&u.phase.indexOf('RESET')>=0;$('upd').className=ask?'warn':'mut';$('upd').style.fontWeight=ask?'700':'';
 if(ask)$('upd').textContent='Press the RESET button on the STM32 (BlackPill) now – waiting up to 30 s';$('updd').textContent=u.detail?('Bootloader entry: '+u.detail):''}
-const d=Object.assign({},s.link.stats,s.diag||{});d.esp_heap=s.esp.heap;$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
+const d=Object.assign({},s.link.stats,s.diag||{});d.esp_heap=s.esp.heap;d.esp_heap_min=s.esp.heap_min;d.esp_heap_block=s.esp.heap_block;$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
 $('log').innerHTML=s.log.slice().sort((a,b)=>b.ms-a.ms).map(e=>`<tr><td class=mut>${(e.ms/1000).toFixed(0)} s</td><td>${e.src==='esp'?'ESP32':'STM32'}</td><td>${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
 loadCfg().then(refresh);setInterval(refresh,2000);
 </script></body></html>)HTML";

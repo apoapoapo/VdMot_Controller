@@ -5,6 +5,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -273,7 +274,11 @@ bool ControlEngine::onMqtt(const char *topic, const char *payload, size_t len, u
     bool matched = false;
     for (uint8_t i = 0; i < cfg_->source_count; i++) {
         const SourceConfig &sc = cfg_->sources[i];
-        if (sc.type != SourceType::Mqtt || strcmp(sc.topic, topic) != 0) {
+        char def[sizeof(mqtt_base_) + 32];
+        if (sc.type != SourceType::Mqtt) {
+            continue;
+        }
+        if (strcmp(mqttTopic(i, def, sizeof(def)), topic) != 0) {
             continue;
         }
         matched = true;
@@ -303,6 +308,22 @@ ControlEngine::Result ControlEngine::setManualTarget(uint8_t ch, uint16_t permil
     manual_[ch] = permille;
     manual_set_[ch] = true;
     return Result::Ok;
+}
+
+void ControlEngine::setMqttBase(const char *base)
+{
+    strncpy(mqtt_base_, base, sizeof(mqtt_base_) - 1);
+    mqtt_base_[sizeof(mqtt_base_) - 1] = '\0';
+}
+
+const char *ControlEngine::mqttTopic(uint8_t i, char *buf, size_t len) const
+{
+    const SourceConfig &sc = cfg_->sources[i];
+    if (sc.topic[0] != '\0') {
+        return sc.topic;
+    }
+    snprintf(buf, len, "%s/source/%s/set", mqtt_base_, sc.id);
+    return buf;
 }
 
 const SourceStatus *ControlEngine::sourceById(const char *id) const
@@ -363,10 +384,35 @@ void ControlEngine::evalZone(uint8_t i, uint32_t now_ms)
     ZoneRt &z = zone_[i];
     ZoneStatus &st = z.status;
 
-    const SourceStatus *src = sourceById(zc.control_source);
-    st.source = src ? src->state : SourceState::Missing;
-    st.has_temperature = src && src->has_value;
-    st.temperature = st.has_temperature ? src->value : 0.0f;
+    /* mean of the valid control sources; if none is valid, the state of the
+     * best one (pending before stale before missing) */
+    float sum_ok = 0.0f, sum_any = 0.0f;
+    int n_ok = 0, n_any = 0;
+    bool pending = false, stale = false;
+    for (const auto &id : zc.control_sources) {
+        const SourceStatus *src = id[0] != '\0' ? sourceById(id) : nullptr;
+        if (src == nullptr) {
+            continue;
+        }
+        if (src->state == SourceState::Ok) {
+            sum_ok += src->value;
+            n_ok++;
+        }
+        if (src->has_value) {
+            sum_any += src->value;
+            n_any++;
+        }
+        pending = pending || src->state == SourceState::Pending;
+        stale = stale || src->state == SourceState::Stale;
+    }
+    st.source = n_ok > 0  ? SourceState::Ok
+                : pending ? SourceState::Pending
+                : stale   ? SourceState::Stale
+                          : SourceState::Missing;
+    st.has_temperature = n_any > 0;
+    st.temperature = n_ok > 0    ? sum_ok / static_cast<float>(n_ok)
+                     : n_any > 0 ? sum_any / static_cast<float>(n_any)
+                                 : 0.0f;
     z.last_mode = zc.mode;
 
     if (zc.mode == ZoneMode::Manual) {

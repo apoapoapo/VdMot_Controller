@@ -171,6 +171,33 @@ class Reader
     bool ok_ = true;
 };
 
+/* a list of source ids */
+void readIds(Reader &r, JsonObjectConst o, const char *key, char (*dst)[kIdSize], uint8_t max)
+{
+    JsonVariantConst v = o[key];
+    if (v.isNull()) {
+        return;
+    }
+    JsonArrayConst list = v.as<JsonArrayConst>();
+    if (list.isNull()) {
+        r.fail(key, "must be a list");
+        return;
+    }
+    if (list.size() > max) {
+        r.fail(key, "has too many entries");
+        return;
+    }
+    uint8_t k = 0;
+    for (JsonVariantConst id : list) {
+        const char *s = id.as<const char *>();
+        if (s == nullptr || strlen(s) >= kIdSize) {
+            r.fail(key, "contains an invalid id");
+            return;
+        }
+        copyStr(dst[k++], kIdSize, s);
+    }
+}
+
 const char *const kNetModes[] = {"auto", "ethernet", "wifi"};
 const char *const kSourceTypes[] = {"onewire", "mqtt"};
 const char *const kZoneModes[] = {"control", "manual"};
@@ -279,15 +306,13 @@ bool dropReferences(JsonObject root, const char *name)
     } else if (strcmp(name, "sources") == 0) {
         JsonArrayConst sources = root["sources"];
         for (JsonVariant zv : root["zones"].as<JsonArray>()) {
-            const char *cs = zv["control_source"];
-            if (cs != nullptr && cs[0] != '\0' && !hasId(sources, cs)) {
-                zv["control_source"] = "";
-            }
-            JsonArray info = zv["info_sources"];
-            for (size_t i = info.size(); i-- > 0;) {
-                const char *id = info[i];
-                if (id != nullptr && !hasId(sources, id)) {
-                    info.remove(i);
+            for (const char *key : {"control_sources", "info_sources"}) {
+                JsonArray list = zv[key];
+                for (size_t i = list.size(); i-- > 0;) {
+                    const char *id = list[i];
+                    if (id != nullptr && !hasId(sources, id)) {
+                        list.remove(i);
+                    }
                 }
             }
         }
@@ -304,10 +329,27 @@ Config::Config()
     }
 }
 
-const Config &configDefaults()
+void Config::reset()
 {
-    static const Config *d = new Config(); /* heap: too large for static RAM */
-    return *d;
+    version = kConfigVersion;
+    device = DeviceConfig();
+    network = NetworkConfig();
+    mqtt = MqttConfig();
+    flow = FlowConfig();
+    source_count = 0;
+    for (SourceConfig &s : sources) {
+        s = SourceConfig();
+    }
+    zone_count = 0;
+    for (ZoneConfig &z : zones) {
+        z = ZoneConfig();
+    }
+    for (uint8_t i = 0; i < VDM_MAX_CHANNELS; i++) {
+        valves[i] = ValveConfig();
+        snprintf(valves[i].name, sizeof(valves[i].name), "Channel %u", i + 1u);
+    }
+    next_source_id = 1;
+    next_zone_id = 1;
 }
 
 int Config::sourceIndex(const char *id) const
@@ -423,7 +465,12 @@ void configToJson(const Config &c, JsonObject o, bool secrets)
         zo["mode"] = kZoneModes[static_cast<uint8_t>(z.mode)];
         zo["setpoint"] = round2(z.setpoint);
         zo["heating"] = z.heating;
-        zo["control_source"] = z.control_source;
+        JsonArray ctl = zo.createNestedArray("control_sources");
+        for (const auto &id : z.control_sources) {
+            if (id[0] != '\0') {
+                ctl.add(id);
+            }
+        }
         JsonArray info = zo.createNestedArray("info_sources");
         for (const auto &id : z.info_sources) {
             if (id[0] != '\0') {
@@ -454,8 +501,8 @@ void configToJson(const Config &c, JsonObject o, bool secrets)
 
 bool configFromJson(JsonObjectConst o, Config &out, char *err, size_t err_len)
 {
-    static Config &c = *new Config(); /* large: neither stack nor static RAM */
-    c = configDefaults();
+    Config &c = out;
+    c.reset();
     err[0] = '\0';
 
     if (o.isNull()) {
@@ -563,29 +610,18 @@ bool configFromJson(JsonObjectConst o, Config &out, char *err, size_t err_len)
         r.choice("mode", z.mode, kZoneModes, 2);
         r.real("setpoint", z.setpoint, 5.0f, 30.0f);
         r.boolean("heating", z.heating);
-        r.str("control_source", z.control_source, sizeof(z.control_source));
+        if (zo["control_sources"].isNull()) {
+            /* first drafts of phase 2b stored a single source */
+            r.str("control_source", z.control_sources[0], kIdSize);
+        } else {
+            readIds(r, zo, "control_sources", z.control_sources, kMaxControlSources);
+        }
+        readIds(r, zo, "info_sources", z.info_sources, kMaxInfoSources);
         r.choice("profile", z.profile, kProfiles, 3);
         r.real("xp", z.xp, 0.2f, 20.0f);
         r.integer("ti_s", z.ti_s, 0, 24L * 3600);
         r.integer("sample_s", z.sample_s, 10, 3600);
         r.integer("fallback_pct", z.fallback_pct, -1, 100);
-        JsonVariantConst iv = zo["info_sources"];
-        JsonArrayConst info = iv;
-        if (!iv.isNull() && info.isNull()) {
-            r.fail("info_sources", "must be a list");
-        } else if (info.size() > kMaxInfoSources) {
-            r.fail("info_sources", "has too many entries");
-        } else {
-            uint8_t k = 0;
-            for (JsonVariantConst id : info) {
-                const char *s = id.as<const char *>();
-                if (s == nullptr || strlen(s) >= kIdSize) {
-                    r.fail("info_sources", "contains an invalid id");
-                    break;
-                }
-                copyStr(z.info_sources[k++], kIdSize, s);
-            }
-        }
         if (!r.ok()) {
             return false;
         }
@@ -657,10 +693,6 @@ bool configValidate(const Config &c, char *err, size_t err_len)
             setErr(err, err_len, "source '%s': invalid 1-Wire ROM id '%s'", s.name, s.rom);
             return false;
         }
-        if (s.type == SourceType::Mqtt && s.topic[0] == '\0') {
-            setErr(err, err_len, "source '%s' needs an MQTT topic", s.name);
-            return false;
-        }
     }
 
     for (uint8_t i = 0; i < c.zone_count; i++) {
@@ -681,10 +713,11 @@ bool configValidate(const Config &c, char *err, size_t err_len)
             setErr(err, err_len, "zone '%s' needs a name", z.id);
             return false;
         }
-        if (z.control_source[0] != '\0' && c.sourceIndex(z.control_source) < 0) {
-            setErr(err, err_len, "zone '%s': unknown control source '%s'", z.name,
-                   z.control_source);
-            return false;
+        for (const auto &id : z.control_sources) {
+            if (id[0] != '\0' && c.sourceIndex(id) < 0) {
+                setErr(err, err_len, "zone '%s': unknown control source '%s'", z.name, id);
+                return false;
+            }
         }
         for (const auto &id : z.info_sources) {
             if (id[0] != '\0' && c.sourceIndex(id) < 0) {
@@ -715,8 +748,15 @@ bool configValidate(const Config &c, char *err, size_t err_len)
 bool configApplySection(const Config &base, const char *name, JsonVariantConst section, Config &out,
                         char *err, size_t err_len)
 {
-    static DynamicJsonDocument doc(kConfigJsonCapacity);
-    doc.clear();
+    if (&base == &out) {
+        snprintf(err, err_len, "internal error: base and out are the same");
+        return false;
+    }
+    DynamicJsonDocument doc(kConfigJsonCapacity);
+    if (doc.capacity() == 0) {
+        snprintf(err, err_len, "out of memory");
+        return false;
+    }
     JsonObject root = doc.to<JsonObject>();
     configToJson(base, root, true);
 

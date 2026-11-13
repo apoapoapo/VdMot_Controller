@@ -54,6 +54,62 @@ bool authorized()
     return false;
 }
 
+/* JSON straight into the connection, buffered: no String copy of the
+ * whole document on the heap */
+class ClientWriter
+{
+  public:
+    explicit ClientWriter(WiFiClient c) : c_(c) {}
+    ~ClientWriter()
+    {
+        flush();
+    }
+    size_t write(uint8_t b)
+    {
+        buf_[n_++] = b;
+        if (n_ == sizeof(buf_)) {
+            flush();
+        }
+        return 1;
+    }
+    size_t write(const uint8_t *s, size_t len)
+    {
+        for (size_t i = 0; i < len; i++) {
+            write(s[i]);
+        }
+        return len;
+    }
+    void flush()
+    {
+        if (n_ > 0) {
+            c_.write(buf_, n_);
+            n_ = 0;
+        }
+    }
+
+  private:
+    WiFiClient c_;
+    uint8_t buf_[1024];
+    size_t n_ = 0;
+};
+
+void sendJson(const JsonDocument &doc)
+{
+    server.setContentLength(measureJson(doc));
+    server.send(200, "application/json", "");
+    ClientWriter w(server.client());
+    serializeJson(doc, w);
+}
+
+bool docAllocated(const JsonDocument &doc)
+{
+    if (doc.capacity() > 0) {
+        return true;
+    }
+    server.send(503, "application/json", "{\"ok\":false,\"error\":\"ESP32 out of memory\"}");
+    return false;
+}
+
 void reply(bool ok, const String &error = String())
 {
     StaticJsonDocument<192> doc;
@@ -205,6 +261,9 @@ void handleState()
     const vdm::Model &m = g_model;
 
     DynamicJsonDocument doc(40960);
+    if (!docAllocated(doc)) {
+        return;
+    }
     JsonObject esp = doc.createNestedObject("esp");
     char v[24];
     snprintf(v, sizeof(v), "%d.%d.%d+%lu", FW_VERSION_MAJOR, FW_VERSION_MINOR, FW_VERSION_PATCH,
@@ -212,6 +271,8 @@ void handleState()
     esp["version"] = v;
     esp["uptime_s"] = millis() / 1000;
     esp["heap"] = ESP.getFreeHeap();
+    esp["heap_min"] = ESP.getMinFreeHeap();
+    esp["heap_block"] = ESP.getMaxAllocHeap();
     esp_app_desc_t prev;
     if (otherApp(&prev) != nullptr) {
         JsonObject o = esp.createNestedObject("previous");
@@ -360,10 +421,10 @@ void handleState()
         o["src"] = "esp";
     }
     doc["error"] = err;
-
-    String out;
-    serializeJson(doc, out);
-    server.send(200, "application/json", out);
+    if (doc.overflowed()) {
+        doc["truncated"] = true;
+    }
+    sendJson(doc);
 }
 
 void handleTarget()
@@ -399,12 +460,19 @@ void handleConfigGet()
     if (!authorized()) {
         return;
     }
-    static DynamicJsonDocument doc(vdm::kConfigJsonCapacity);
-    doc.clear();
+    DynamicJsonDocument doc(vdm::kConfigJsonCapacity);
+    if (!docAllocated(doc)) {
+        return;
+    }
     vdm::configToJson(config(), doc.to<JsonObject>(), false);
-    String out;
-    serializeJson(doc, out);
-    server.send(200, "application/json", out);
+    char mqtt_base[96];
+    mqttBaseTopic(mqtt_base, sizeof(mqtt_base));
+    doc["mqtt_base"] = mqtt_base;
+    if (doc.overflowed()) {
+        server.send(500, "application/json", "{\"error\":\"configuration too large\"}");
+        return;
+    }
+    sendJson(doc);
 }
 
 bool restartNeeded(const vdm::Config &a, const vdm::Config &b)
@@ -420,7 +488,8 @@ void replyCommit(const vdm::Config &next)
 {
     bool restart = restartNeeded(config(), next);
     if (!settingsCommit(next)) {
-        reply(false, "the configuration is active but could not be saved");
+        reply(false, "the configuration could not be saved (unchanged); see the free heap "
+                     "under System → Diagnostics");
         return;
     }
     StaticJsonDocument<96> doc;
@@ -436,7 +505,10 @@ void handleConfigSection()
     if (!authorized()) {
         return;
     }
-    static DynamicJsonDocument in(16384);
+    DynamicJsonDocument in(16384);
+    if (!docAllocated(in)) {
+        return;
+    }
     DeserializationError e = deserializeJson(in, server.arg("plain"));
     if (e) {
         reply(false, String("invalid JSON: ") + e.c_str());
@@ -456,7 +528,11 @@ void handleConfigExport()
     if (!authorized()) {
         return;
     }
-    std::string text = vdm::ConfigStore::toText(config(), true, true);
+    std::string text;
+    if (!vdm::ConfigStore::toText(config(), true, true, text)) {
+        server.send(503, "text/plain", "ESP32 out of memory");
+        return;
+    }
     char disp[96];
     snprintf(disp, sizeof(disp), "attachment; filename=\"%s-config.json\"", hostname());
     server.sendHeader("Content-Disposition", disp);

@@ -6,6 +6,9 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <Preferences.h>
+#include <esp_mac.h>
+
+#include "app/shared.h"
 
 #include "app/control.h"
 #include "core/config_store.h"
@@ -142,7 +145,7 @@ void settingsBegin()
         if (takeLegacy(c) && vdm::configValidate(c, err, sizeof(err))) {
             strlcat(g_info, ", network settings taken over from the 1.x firmware", sizeof(g_info));
         } else {
-            c = vdm::configDefaults();
+            c.reset();
         }
         saveNow();
     }
@@ -164,10 +167,39 @@ const vdm::Config &config()
 
 bool settingsCommit(const vdm::Config &c)
 {
+    /* saved first: a configuration that cannot be stored is not used */
+    if (!g_store.save(c)) {
+        espLog(VDM_LOG_ERROR, "configuration could not be saved, change discarded");
+        return false;
+    }
+    g_dirty = false;
     g_cfg = c;
     updateHostname();
     controlReconfigure();
-    return saveNow();
+    return true;
+}
+
+void mqttBaseTopic(char *out, size_t len)
+{
+    const vdm::MqttConfig &m = g_cfg.mqtt;
+    if (m.base_topic[0] != '\0') {
+        strlcpy(out, m.base_topic, len);
+        return;
+    }
+    char id[vdm::kNameSize];
+    mqttClientId(id, sizeof(id));
+    snprintf(out, len, "vdmot/%s", id);
+}
+
+void mqttClientId(char *out, size_t len)
+{
+    if (g_cfg.mqtt.client_id[0] != '\0') {
+        strlcpy(out, g_cfg.mqtt.client_id, len);
+        return;
+    }
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_ETH);
+    snprintf(out, len, "vdmot-%02x%02x%02x", mac[3], mac[4], mac[5]);
 }
 
 vdm::Config &settingsEdit()
