@@ -13,10 +13,11 @@ The CI builds them for every pull request. Open the pull request, go to
 |---|---|---|
 | `firmware-esp32-wt32_eth01` | `firmware.bin` | ESP32 (WT32-ETH01) |
 | `firmware-stm32-f411_c2` | `firmware.bin` | STM32**F411**CE BlackPill |
-| `firmware-stm32-f401_c2` | `firmware.bin` | STM32**F401**CC BlackPill |
+| `firmware-stm32-f401_c2` | `firmware.bin` | STM32**F401**CC BlackPill (V2.0) |
+| `firmware-stm32-f401ce_c2` | `firmware.bin` | STM32**F401**CE BlackPill (WeAct V3.0) |
 
-Check the marking on the BlackPill's chip (`STM32F411CEU6` or
-`STM32F401CCU6`). After flashing, the web page shows the chip the
+Check the marking on the BlackPill's chip (`STM32F411CEU6`, `STM32F401CCU6`
+or `STM32F401CEU6`; WeAct V3.0 boards exist with F401CE and F411CE). After flashing, the web page shows the chip the
 bootloader reported.
 
 Keep the legacy binaries at hand to go back (upstream releases of

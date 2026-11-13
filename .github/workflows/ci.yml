@@ -52,6 +52,8 @@ jobs:
             env: f411_c2
           - target: stm32
             env: f401_c2
+          - target: stm32
+            env: f401ce_c2
           - target: esp32
             env: wt32_eth01
     steps:
