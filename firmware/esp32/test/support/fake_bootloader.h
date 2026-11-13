@@ -282,6 +282,20 @@ struct MemImage : vdm::ImageSource {
     }
 };
 
+/* puts a firmware info block (vdm/fw_info.h) at `offset` */
+inline void addFwInfo(MemImage &img, size_t offset, uint16_t a, uint16_t b)
+{
+    const uint8_t info[16] = {'V',        'D',
+                              'M',        'O',
+                              'T',        'F',
+                              'W',        '2',
+                              (uint8_t)a, (uint8_t)(a >> 8),
+                              (uint8_t)b, (uint8_t)(b >> 8),
+                              2,          1,
+                              0,          0};
+    memcpy(&img.data[offset], info, sizeof(info));
+}
+
 inline MemImage makeImage(size_t size, uint32_t seed = 1)
 {
     MemImage img;

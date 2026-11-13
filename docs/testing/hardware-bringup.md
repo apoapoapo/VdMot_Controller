@@ -7,18 +7,22 @@ adapter**: everything is done through the web interfaces.
 ## 1. Get the binaries
 
 The CI builds them for every pull request. Open the pull request, go to
-**Checks → CI → Summary** and download the artifacts:
+**Checks → CI → Summary** and download the binaries (single `.bin` files,
+named after target, board and build number, e.g.
+`vdmot-v2-stm32-f401ce_c2-build12.bin`):
 
-| Artifact | File | Use |
-|---|---|---|
-| `firmware-esp32-wt32_eth01` | `firmware.bin` | ESP32 (WT32-ETH01) |
-| `firmware-stm32-f411_c2` | `firmware.bin` | STM32**F411**CE BlackPill |
-| `firmware-stm32-f401_c2` | `firmware.bin` | STM32**F401**CC BlackPill (V2.0) |
-| `firmware-stm32-f401ce_c2` | `firmware.bin` | STM32**F401**CE BlackPill (WeAct V3.0) |
+| Binary | Use |
+|---|---|
+| `vdmot-v2-esp32-wt32_eth01-buildN.bin` | ESP32 (WT32-ETH01) |
+| `vdmot-v2-stm32-f411_c2-buildN.bin` | STM32**F411**CE BlackPill |
+| `vdmot-v2-stm32-f401_c2-buildN.bin` | STM32**F401**CC BlackPill (V2.0); also runs on the F401CE |
+| `vdmot-v2-stm32-f401ce_c2-buildN.bin` | STM32**F401**CE BlackPill (WeAct V3.0) |
 
 Check the marking on the BlackPill's chip (`STM32F411CEU6`, `STM32F401CCU6`
-or `STM32F401CEU6`; WeAct V3.0 boards exist with F401CE and F411CE). After flashing, the web page shows the chip the
-bootloader reported.
+or `STM32F401CEU6`; WeAct V3.0 boards exist with F401CE and F411CE). Every
+v2 STM32 image names the chips it is built for; the ESP32 compares this
+with the chip the bootloader reports and refuses a wrong image before
+erasing anything.
 
 Keep the legacy binaries at hand to go back (upstream releases of
 VdMot_Controller 1.4.x: `ESP32_firmware.bin`, `STM32F411_C2_firmware.bin` /
@@ -53,10 +57,13 @@ every 5 minutes (it assumes a hang), which does no harm.
    writing, the new firmware is started by the bootloader itself (GO
    command), no reset needed. The line *Bootloader entry* shows what
    happened in detail.
-3. If the STM32 has no working firmware any more (e.g. an update was
-   interrupted while writing), the handshake cannot work: hold the **BOOT0
-   button** on the BlackPill and click **Flash STM32** again; release it
-   when the progress shows *erasing*.
+3. **Recovery** – if the STM32 has no working firmware any more (wrong
+   image, interrupted update; the LED does not blink after RESET), the
+   handshake cannot work. Put the STM32 into its ROM bootloader by hand:
+   hold **BOOT0**, press and release **RESET** (or plug in the power),
+   release BOOT0. The STM32 now waits in the bootloader (no LED activity).
+   Then click **Flash STM32**: the ESP32 finds the active bootloader in its
+   first step (*Bootloader entry: probe: bootloader active*).
 4. The link changes to **connected**, the header shows both versions.
 
 ## 4. What happens next (automatically)

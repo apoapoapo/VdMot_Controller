@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "vdm/fw_info.h"
+
 namespace vdm
 {
 
@@ -64,6 +66,8 @@ const char *flashResultName(FlashResult r)
         return "write failed";
     case FlashResult::VerifyFailed:
         return "verification failed";
+    case FlashResult::WrongChip:
+        return "image is built for another STM32 chip";
     case FlashResult::ReadFailed:
         return "cannot read the image";
     }
@@ -332,6 +336,28 @@ bool Stm32Flasher::readBlock(BootPort &port, uint32_t addr, uint8_t *data, size_
     return true;
 }
 
+bool Stm32Flasher::findFwInfo(ImageSource &image, uint16_t (&chips)[2])
+{
+    constexpr size_t kChunk = 256;
+    uint8_t buf[kChunk + VDM_FW_INFO_LEN];
+    size_t size = image.size();
+    for (size_t off = 0; off < size; off += kChunk) {
+        size_t len = size - off < sizeof(buf) ? size - off : sizeof(buf);
+        if (!image.read(off, buf, len)) {
+            return false;
+        }
+        for (size_t i = 0; i + VDM_FW_INFO_LEN <= len; i++) {
+            if (memcmp(&buf[i], VDM_FW_INFO_MAGIC, VDM_FW_INFO_MAGIC_LEN) == 0) {
+                const uint8_t *p = &buf[i + VDM_FW_INFO_MAGIC_LEN];
+                chips[0] = static_cast<uint16_t>(p[0] | (p[1] << 8));
+                chips[1] = static_cast<uint16_t>(p[2] | (p[3] << 8));
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 FlashResult Stm32Flasher::flash(BootPort &port, ImageSource &image, Progress progress, void *ctx)
 {
     size_t size = image.size();
@@ -353,6 +379,14 @@ FlashResult Stm32Flasher::flash(BootPort &port, ImageSource &image, Progress pro
         result = FlashResult::UnknownChip;
     } else if (size > flash_size_) {
         result = FlashResult::TooLarge;
+    } else {
+        uint16_t chips[2];
+        if (findFwInfo(image, chips)) {
+            note("; image for 0x%03X/0x%03X", chips[0], chips[1]);
+            if (chip_id_ != chips[0] && chip_id_ != chips[1]) {
+                result = FlashResult::WrongChip;
+            }
+        }
     }
 
     if (result == FlashResult::Ok) {

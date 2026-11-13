@@ -85,6 +85,27 @@ static void test_manual_reset_when_nrst_is_not_wired(void)
     TEST_ASSERT_EQUAL(FlashResult::NoBootloader, f.flash(bl2, img));
 }
 
+static void test_wrong_chip_is_refused_before_erasing(void)
+{
+    FakeBootloader bl;
+    bl.chip_id = 0x433; /* STM32F401xE */
+    MemImage img = makeImage(30000);
+    sim::addFwInfo(img, 255 * 3 + 7, 0x431, 0x431); /* built for the F411, crosses a chunk */
+    Stm32Flasher f;
+    TEST_ASSERT_EQUAL(FlashResult::WrongChip, f.flash(bl, img));
+    TEST_ASSERT_EQUAL_HEX32(0, bl.sectors_erased);
+    TEST_ASSERT_FALSE(bl.boot0);
+
+    MemImage ok = makeImage(30000);
+    sim::addFwInfo(ok, 20000, 0x423, 0x433); /* F401xC image also runs on the F401xE */
+    TEST_ASSERT_EQUAL(FlashResult::Ok, f.flash(bl, ok));
+    uint16_t chips[2];
+    TEST_ASSERT_TRUE(Stm32Flasher::findFwInfo(ok, chips));
+    TEST_ASSERT_EQUAL_HEX16(0x423, chips[0]);
+    TEST_ASSERT_EQUAL_HEX16(0x433, chips[1]);
+    TEST_ASSERT_FALSE(Stm32Flasher::findFwInfo(img = makeImage(5000), chips));
+}
+
 static void test_already_in_bootloader(void)
 {
     FakeBootloader bl;
@@ -202,6 +223,7 @@ int main(void)
     RUN_TEST(test_flash_and_verify);
     RUN_TEST(test_software_entry_without_boot0);
     RUN_TEST(test_manual_reset_when_nrst_is_not_wired);
+    RUN_TEST(test_wrong_chip_is_refused_before_erasing);
     RUN_TEST(test_already_in_bootloader);
     RUN_TEST(test_boot0_fallback_for_blank_chip);
     RUN_TEST(test_large_image_erases_more_sectors);

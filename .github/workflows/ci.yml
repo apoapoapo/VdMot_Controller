@@ -71,8 +71,14 @@ jobs:
         env:
           PLATFORMIO_BUILD_FLAGS: -DFW_BUILD=${{ github.run_number }}
         run: pio run -e ${{ matrix.env }}
+      - name: Name the binary
+        run: |
+          mkdir -p out
+          cp firmware/${{ matrix.target }}/.pio/build/${{ matrix.env }}/firmware.bin \
+             out/vdmot-v2-${{ matrix.target }}-${{ matrix.env }}-build${{ github.run_number }}.bin
+      # a single .bin per artifact, not zipped; the file name is the artifact name
       - uses: actions/upload-artifact@v7
         with:
-          name: firmware-${{ matrix.target }}-${{ matrix.env }}
-          path: firmware/${{ matrix.target }}/.pio/build/${{ matrix.env }}/firmware.bin
+          path: out/vdmot-v2-${{ matrix.target }}-${{ matrix.env }}-build${{ github.run_number }}.bin
+          archive: false
           if-no-files-found: error

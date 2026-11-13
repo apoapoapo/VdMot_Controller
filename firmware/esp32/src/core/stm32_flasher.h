@@ -60,6 +60,7 @@ enum class FlashResult : uint8_t {
     WriteFailed,
     VerifyFailed,
     ReadFailed, /* image source error */
+    WrongChip,  /* the image is built for another STM32 */
 };
 
 const char *flashResultName(FlashResult r);
@@ -74,6 +75,8 @@ class Stm32Flasher
 
     /* Checks the vector table of an application image (stack pointer in
      * SRAM, reset handler in flash). */
+    /* firmware info block (vdm/fw_info.h); false if the image has none */
+    static bool findFwInfo(ImageSource &image, uint16_t (&chips)[2]);
     static bool plausibleImage(const uint8_t *head, size_t head_len, size_t size);
 
     FlashResult flash(BootPort &port, ImageSource &image, Progress progress = nullptr,

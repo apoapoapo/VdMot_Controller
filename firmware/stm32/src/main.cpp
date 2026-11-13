@@ -13,6 +13,7 @@
 #include "board/board.h"
 #include "board/pins.h"
 #include "core/controller.h"
+#include "vdm/fw_info.h"
 
 #ifndef VDM_MCU
 #error "VDM_MCU must be defined by the build environment"
@@ -23,6 +24,30 @@
 #ifndef FW_BUILD
 #define FW_BUILD 0
 #endif
+
+#if !defined(VDM_CHIP_A) || !defined(VDM_CHIP_B)
+#error "VDM_CHIP_A/B must be defined by the build environment"
+#endif
+
+/* Firmware info block, checked by the ESP32 before flashing (vdm/fw_info.h) */
+extern "C" __attribute__((used)) const uint8_t vdm_fw_info[VDM_FW_INFO_LEN] = {
+    'V',
+    'D',
+    'M',
+    'O',
+    'T',
+    'F',
+    'W',
+    '2',
+    static_cast<uint8_t>(VDM_CHIP_A & 0xFFu),
+    static_cast<uint8_t>(VDM_CHIP_A >> 8),
+    static_cast<uint8_t>(VDM_CHIP_B & 0xFFu),
+    static_cast<uint8_t>(VDM_CHIP_B >> 8),
+    static_cast<uint8_t>(VDM_HW_REV),
+    VDM_PROTO_VERSION,
+    0,
+    0,
+};
 
 namespace
 {
@@ -47,6 +72,8 @@ vdm::Controller *controller = nullptr;
 void setup()
 {
     board::safeOutputs();
+    /* keep the info block in the image (--gc-sections) */
+    __asm__ volatile("" : : "r"(vdm_fw_info));
     /* started by the bootloader's GO command: undo its memory remap */
     __HAL_RCC_SYSCFG_CLK_ENABLE();
     __HAL_SYSCFG_REMAPMEMORY_FLASH();
