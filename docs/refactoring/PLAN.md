@@ -48,6 +48,8 @@ structure, STM32 update via ROM bootloader) are kept, the structure is not.
 | D6 | STM32 and ESP32 are always updated **together** (ESP flashes the STM via ROM bootloader); no compatibility with the 1.x text protocol | avoids transition code |
 | D7 | Integration: **MQTT / Home Assistant first**; KNX will be discussed separately later as its own adapter | HA is almost there, fastest benefit |
 | D8 | Primary target hardware **C2 + STM32F411**; F401 and C1 remain possible via build environments but are not primarily tested | hardware at hand |
+| D10 | On ESP failure the STM32 opens **all valves fully** after `link_timeout_s` (default 300 s) | heating keeps working, no frost risk; overheating is the lesser risk |
+| D11 | Automatic recalibration defaults stay as in 1.x (2000 moves / 7 days); both values and the failsafe behaviour are configurable in the web UI | no field experience yet with other values |
 | D9 | Code, comments, documentation, commit messages and issues are written in **English** | public repository |
 
 Open / later:

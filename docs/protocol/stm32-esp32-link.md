@@ -223,16 +223,21 @@ then restarts (`NVIC_SystemReset`).
 
 #### `0x04 SET_SYSTEM_CONFIG`
 
-| Field | Type | Range | Meaning |
-|---|---|---|---|
-| `link_timeout_s` | u16 | 0, 10…3600 | If the STM32 receives no valid request for this long, the ESP is considered failed. `0` = never. |
-| `failsafe_pos` | u16 | 0…1000, `0xFFFF` | Target position (0.1 %) on ESP failure. `0xFFFF` = hold the current position. |
-| `startup_pos` | u16 | 0…1000, `0xFFFF` | Target position after boot until the ESP sends targets. `0xFFFF` = last stored target. |
-| `sensor_interval_s` | u16 | 5…3600 | 1-Wire measurement interval |
-| `recal_after_moves` | u16 | 0, 50…10000 | Automatic recalibration after this many moves. `0` = off. |
-| `recal_after_days` | u8 | 0, 1…60 | Automatic recalibration after this many days of uptime. `0` = off. |
+| Field | Type | Range | Default | Meaning |
+|---|---|---|---|---|
+| `link_timeout_s` | u16 | 0, 10…3600 | 300 | If the STM32 receives no valid request for this long, the ESP is considered failed. `0` = never. |
+| `failsafe_pos` | u16 | 0…1000, `0xFFFF` | 1000 | Target position (0.1 %) on ESP failure. `0xFFFF` = hold the current position. |
+| `startup_pos` | u16 | 0…1000, `0xFFFF` | `0xFFFF` | Target position after boot until the ESP sends targets. `0xFFFF` = last stored target. |
+| `sensor_interval_s` | u16 | 5…3600 | 30 | 1-Wire measurement interval |
+| `recal_after_moves` | u16 | 0, 50…10000 | 2000 | Automatic recalibration after this many moves. `0` = off. |
+| `recal_after_days` | u8 | 0, 1…60 | 7 | Automatic recalibration after this many days of uptime. `0` = off. |
 
 Stored persistently. Response: `config_crc` (u16).
+
+The defaults apply when the EEPROM holds no valid record. The default
+failsafe is **fully open** (`1000`): if the ESP fails, the heating keeps
+running and no room can freeze; overheating is the lesser risk. All values
+are configurable in the web UI.
 
 #### `0x05 GET_SYSTEM_CONFIG`
 Response: the same fields as `SET_SYSTEM_CONFIG`.
