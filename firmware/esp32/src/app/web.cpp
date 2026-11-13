@@ -105,6 +105,29 @@ void handleIndex()
     server.send_P(200, "text/html", kIndexHtml);
 }
 
+void putSystemConfig(JsonObject o, const vdm_system_config_t &c)
+{
+    o["link_timeout_s"] = c.link_timeout_s;
+    o["failsafe_pos"] = c.failsafe_pos;
+    o["startup_pos"] = c.startup_pos;
+    o["sensor_interval_s"] = c.sensor_interval_s;
+    o["recal_after_moves"] = c.recal_after_moves;
+    o["recal_after_days"] = c.recal_after_days;
+}
+
+void putMotorParams(JsonObject o, const vdm_motor_params_t &m)
+{
+    o["endstop_factor_open"] = m.endstop_factor_open;
+    o["endstop_factor_close"] = m.endstop_factor_close;
+    o["endstop_abs_ma"] = m.endstop_abs_ma;
+    o["inrush_blank_ms"] = m.inrush_blank_ms;
+    o["opencircuit_ma10"] = m.opencircuit_ma10;
+    o["opencircuit_ms"] = m.opencircuit_ms;
+    o["move_timeout_s"] = m.move_timeout_s;
+    o["min_stroke_counts"] = m.min_stroke_counts;
+    o["max_calib_retries"] = m.max_calib_retries;
+}
+
 void handleState()
 {
     if (!authorized()) {
@@ -206,26 +229,15 @@ void handleState()
     }
 
     if (m.sys_valid) {
-        JsonObject o = doc.createNestedObject("sys");
-        o["link_timeout_s"] = m.sys.link_timeout_s;
-        o["failsafe_pos"] = m.sys.failsafe_pos;
-        o["startup_pos"] = m.sys.startup_pos;
-        o["sensor_interval_s"] = m.sys.sensor_interval_s;
-        o["recal_after_moves"] = m.sys.recal_after_moves;
-        o["recal_after_days"] = m.sys.recal_after_days;
+        putSystemConfig(doc.createNestedObject("sys"), m.sys);
     }
     if (m.motor_valid) {
-        JsonObject o = doc.createNestedObject("motor");
-        o["endstop_factor_open"] = m.motor.endstop_factor_open;
-        o["endstop_factor_close"] = m.motor.endstop_factor_close;
-        o["endstop_abs_ma"] = m.motor.endstop_abs_ma;
-        o["inrush_blank_ms"] = m.motor.inrush_blank_ms;
-        o["opencircuit_ma10"] = m.motor.opencircuit_ma10;
-        o["opencircuit_ms"] = m.motor.opencircuit_ms;
-        o["move_timeout_s"] = m.motor.move_timeout_s;
-        o["min_stroke_counts"] = m.motor.min_stroke_counts;
-        o["max_calib_retries"] = m.motor.max_calib_retries;
+        putMotorParams(doc.createNestedObject("motor"), m.motor);
     }
+    /* defaults of this ESP32 firmware's protocol library, for comparison */
+    JsonObject defs = doc.createNestedObject("defaults");
+    putSystemConfig(defs.createNestedObject("sys"), vdm_system_config_default);
+    putMotorParams(defs.createNestedObject("motor"), vdm_motor_params_default);
     if (m.diag_valid) {
         JsonObject o = doc.createNestedObject("diag");
         o["stm_uptime_s"] = m.diag.uptime_s;

@@ -28,7 +28,10 @@ button{cursor:pointer}button.p{background:var(--acc);color:#fff;border-color:var
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}.mut{color:var(--mut)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:4px 16px}
 label{display:flex;justify-content:space-between;gap:8px}progress{width:200px}
+.chg input{border-color:var(--warn)}small.def{color:var(--warn);font-size:12px}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:6px;display:none;max-width:90vw}
 </style></head><body>
+<div id="toast"></div>
 <header><h1>VdMot Controller</h1>
 <span id="link" class="pill">…</span><span id="ver" class="mut"></span><span id="net" class="mut"></span>
 <span id="err" class="bad"></span></header>
@@ -44,9 +47,10 @@ label{display:flex;justify-content:space-between;gap:8px}progress{width:200px}
 <tbody id="sensors"></tbody></table></section>
 <section><h2>STM32 settings</h2>
 <form id="sys" onsubmit="return save('system',this)"><div class="grid" id="sysf"></div>
-<div class="row"><button class="p">Save system settings</button></div></form>
+<div class="row"><button class="p">Save system settings</button><button type="button" onclick="defaults('sysf','sys')">Load defaults</button>
+<span class="mut">Orange: differs from the default. Settings are stored on the STM32 and survive updates.</span></div></form>
 <form id="mot" onsubmit="return save('motor',this)"><div class="grid" id="motf"></div>
-<div class="row"><button class="p">Save motor parameters</button></div></form>
+<div class="row"><button class="p">Save motor parameters</button><button type="button" onclick="defaults('motf','motor')">Load defaults</button></div></form>
 <form onsubmit="return save('channels',this)"><div class="row">Enabled channels <span id="chans"></span>
 <button class="p">Save</button></div></form></section>
 <section><h2>Firmware</h2>
@@ -77,9 +81,16 @@ let formsDone=false,editing=new Set();
 const $=id=>document.getElementById(id);
 const pct=v=>v===65535?'?':(v/10).toFixed(1);
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-async function post(path,body){const r=await fetch('/api/'+path,{method:'POST',body});const j=await r.json().catch(()=>({ok:false,error:r.statusText}));
-if(!j.ok)alert(j.error||'failed');refresh();return j}
+let toastT=0;function toast(m){const t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',4000)}
+const DONE={'stm32/reset':'Restart sent – the STM32 restarts (see boot # and log)','stm32/hardreset':'Reset pulse sent – only reaches the STM32 with jumper X20',
+calibrate:'Calibration scheduled',detect:'Detection scheduled',stop:'Stop sent',scan:'Bus search started',target:'Target sent',
+'config/system':'System settings saved','config/motor':'Motor parameters saved','config/channels':'Channels saved',reboot:'ESP32 restarts…','esp/rollback':'Starting the previous firmware…'};
+async function post(path,body){let j;try{const r=await fetch('/api/'+path,{method:'POST',body});j=await r.json().catch(()=>({ok:false,error:r.statusText}))}catch(e){j={ok:false,error:'ESP32 not reachable'}}
+if(!j.ok)alert(j.error||'failed');else toast(DONE[path]||'Done');refresh();return j}
 function act(a,ch){const f=new FormData();if(ch!==undefined)f.append('ch',ch);post(a,f)}
+let lastState=null;
+function defaults(id,kind){const d=lastState&&lastState.defaults&&lastState.defaults[kind];if(!d)return;
+Object.entries(d).forEach(([k,v])=>{const i=$(id).querySelector(`[name=${k}]`);if(i)i.value=v});toast('Defaults loaded – click Save to apply')}
 function setT(ch){const v=$('t'+ch).value;const f=new FormData();f.append('ch',ch);f.append('pos',v);editing.delete(ch);post('target',f)}
 function save(kind,form){post('config/'+kind,new FormData(form));return false}
 function flags(f){const n=[];if(f&1)n.push('cal');if(f&2)n.push('cal pending');if(f&4)n.push('pos?');if(f&8)n.push('end');if(f&16)n.push('failsafe');return n.join(', ')}
@@ -88,8 +99,10 @@ const x=new XMLHttpRequest();const f=new FormData();f.append('file',fi,fi.name);
 x.upload.onprogress=e=>{$('prog').value=e.loaded*100/e.total;$('upd').textContent='uploading '+kind};
 x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}$('upd').textContent=j.ok?(kind==='esp'?'ESP32 updated, restarting…':'flashing STM32…'):('error: '+(j.error||x.status))};
 x.open('POST','/api/'+kind+'/firmware');x.send(f)}
-function fill(id,fields,vals){const g=$(id);if(!formsDone)g.innerHTML=fields.map(([k,l])=>`<label>${l}<input type=number name=${k}></label>`).join('');
-if(vals&&!g.contains(document.activeElement))fields.forEach(([k])=>{g.querySelector(`[name=${k}]`).value=vals[k]})}
+function fill(id,fields,vals,defs){const g=$(id);if(!formsDone)g.innerHTML=fields.map(([k,l])=>`<label data-k=${k}><span>${l} <small class=def></small></span><input type=number name=${k}></label>`).join('');
+if(!vals)return;fields.forEach(([k])=>{const lab=g.querySelector(`[data-k=${k}]`);const diff=defs&&vals[k]!==defs[k];
+lab.classList.toggle('chg',!!diff);lab.querySelector('small').textContent=diff?`(default ${defs[k]})`:''});
+if(!g.contains(document.activeElement))fields.forEach(([k])=>{g.querySelector(`[name=${k}]`).value=vals[k]})}
 async function refresh(){let s;try{s=await (await fetch('/api/state')).json()}catch(e){$('link').textContent='ESP32 not reachable';return}
 const l=s.link;$('link').textContent='STM32 '+l.state;$('link').className='pill '+(l.state==='connected'?'ok':'bad');
 $('ver').textContent='ESP32 '+s.esp.version+(s.stm?(' · STM32 '+s.stm.version+' ('+s.stm.mcu+', '+s.stm.hw+') · boot #'+s.stm.boot_count+', last reset: '+(RESETS[s.stm.reset_cause]||s.stm.reset_cause)+', up '+dur(s.diag&&s.diag.stm_uptime_s)):'');
@@ -103,7 +116,7 @@ return `<tr><td>${v.ch+1}</td><td class="${cls}">${m}${v.fault?' – '+FAULTS[v.
 $('sensors').innerHTML=s.sensors.map(x=>{const t=x.kind===2||x.kind===3;return `<tr><td>${x.rom}</td><td>${KINDS[x.kind]||x.kind}</td>
 <td class=num>${x.age===65535?'':(x.value/1000).toFixed(t?3:2)}</td><td class="${x.status?'warn':''}">${SSTAT[x.status]||x.status}</td><td class=num>${x.age===65535?'':x.age}</td></tr>`}).join('');
 $('scan').textContent=s.scan?`${s.scan.total} devices, bus ${s.scan.bus_ok?'ok':'error'}`:'';
-fill('sysf',SYSF,s.sys);fill('motf',MOTF,s.motor);
+lastState=s;const D=s.defaults||{};fill('sysf',SYSF,s.sys,D.sys);fill('motf',MOTF,s.motor,D.motor);
 if(!formsDone){$('chans').innerHTML=s.valves.map(v=>`<label style="display:inline-flex;gap:2px"><input type=checkbox name=ch value=${v.ch}>${v.ch+1}</label>`).join(' ');}
 if(!$('chans').contains(document.activeElement))s.valves.forEach(v=>{$('chans').querySelector(`[value="${v.ch}"]`).checked=v.mode!==0});
 formsDone=true;

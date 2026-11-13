@@ -485,8 +485,14 @@ void LinkClient::onEvent(const vdm_frame_t &f, uint32_t now_ms)
         }
         if (model_.state == LinkState::Connected) {
             model_.stats.stm_reboots++;
-            static const char kMsg[] = "link: STM32 restarted";
-            model_.addLog(now_ms, VDM_LOG_WARN, kMsg, sizeof(kMsg) - 1);
+            static const char *const kCauses[] = {"unknown",  "power-on",  "reset pin", "software",
+                                                  "watchdog", "brown-out", "low-power"};
+            uint8_t cause = model_.hello_valid ? model_.hello.reset_cause : 0;
+            char text[64];
+            int n = snprintf(text, sizeof(text), "STM32 restarted (reset cause: %s)",
+                             cause <= 6 ? kCauses[cause] : "?");
+            model_.addLog(now_ms, cause == VDM_RESET_SOFTWARE ? VDM_LOG_INFO : VDM_LOG_WARN, text,
+                          n > 0 ? static_cast<size_t>(n) : 0u);
         }
         if (model_.state != LinkState::Incompatible) {
             setState(LinkState::Disconnected, now_ms);

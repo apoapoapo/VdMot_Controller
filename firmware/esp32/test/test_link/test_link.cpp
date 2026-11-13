@@ -291,6 +291,25 @@ static void test_commands_and_errors(void)
     TEST_ASSERT_EQUAL_UINT8(3, r.m().scan.total);
 }
 
+static void test_restart_stm32_via_link(void)
+{
+    Rig r;
+    r.runMs(3000);
+    TEST_ASSERT_TRUE(r.client.resetStm32());
+    r.runMs(200);
+    TEST_ASSERT_EQUAL_INT(1, r.stm->system.resets); /* the STM32 executed the reset */
+    /* the real STM32 restarts now: simulate it with the reset cause */
+    r.reboot(0);
+    r.runMs(3000);
+    TEST_ASSERT_EQUAL(vdm::LinkState::Connected, r.m().state);
+    TEST_ASSERT_EQUAL_UINT32(1, r.m().stats.stm_reboots);
+    bool logged = false;
+    for (uint8_t i = 0; i < r.m().log_count; i++) {
+        logged = logged || strstr(r.m().log[i].text, "STM32 restarted") != nullptr;
+    }
+    TEST_ASSERT_TRUE(logged);
+}
+
 static void test_suspend_for_update(void)
 {
     Rig r;
@@ -313,6 +332,7 @@ int main(void)
     RUN_TEST(test_stm_reboot_resends_targets);
     RUN_TEST(test_silent_stm_requests_hard_reset);
     RUN_TEST(test_commands_and_errors);
+    RUN_TEST(test_restart_stm32_via_link);
     RUN_TEST(test_suspend_for_update);
     return UNITY_END();
 }
