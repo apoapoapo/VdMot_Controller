@@ -14,7 +14,7 @@ jobs:
     name: clang-format
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check formatting of v2 code
         run: |
           files=$(git ls-files 'common/*.c' 'common/*.h' 'firmware/*.c' 'firmware/*.h' 'firmware/*.cpp')
@@ -28,11 +28,11 @@ jobs:
       matrix:
         project: [common/protocol, firmware/stm32, firmware/esp32]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.platformio
           key: pio-native-${{ hashFiles(format('{0}/platformio.ini', matrix.project)) }}
@@ -55,11 +55,11 @@ jobs:
           - target: esp32
             env: wt32_eth01
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.platformio
           key: pio-${{ matrix.target }}-${{ hashFiles(format('firmware/{0}/platformio.ini', matrix.target)) }}
@@ -69,7 +69,7 @@ jobs:
         env:
           PLATFORMIO_BUILD_FLAGS: -DFW_BUILD=${{ github.run_number }}
         run: pio run -e ${{ matrix.env }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: firmware-${{ matrix.target }}-${{ matrix.env }}
           path: firmware/${{ matrix.target }}/.pio/build/${{ matrix.env }}/firmware.bin
