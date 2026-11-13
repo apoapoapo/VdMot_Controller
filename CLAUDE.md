@@ -18,6 +18,7 @@
 ## Build and test
 - Protocol host tests: `cd common/protocol && pio test -e native`
 - STM32 firmware: `cd firmware/stm32 && pio run` (envs `f411_c2`, `f401_c2`)
+- STM32 core host tests (valve simulator): `cd firmware/stm32 && pio test -e native`
 - ESP32 firmware: `cd firmware/esp32 && pio run` (env `wt32_eth01`)
 - Formatting: `clang-format` with the repository's `.clang-format`, applied to
   `common/` and `firmware/` only; CI checks it.

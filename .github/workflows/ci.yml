@@ -21,8 +21,12 @@ jobs:
           clang-format-18 --dry-run --Werror $files
 
   host-tests:
-    name: Host tests (protocol)
+    name: Host tests (${{ matrix.project }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [common/protocol, firmware/stm32]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,10 +35,10 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-native-${{ hashFiles('common/protocol/platformio.ini') }}
+          key: pio-native-${{ hashFiles(format('{0}/platformio.ini', matrix.project)) }}
       - run: pip install platformio
       - name: Run tests
-        working-directory: common/protocol
+        working-directory: ${{ matrix.project }}
         run: pio test -e native
 
   build:
@@ -62,6 +66,8 @@ jobs:
       - run: pip install platformio
       - name: Build
         working-directory: firmware/${{ matrix.target }}
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DFW_BUILD=${{ github.run_number }}
         run: pio run -e ${{ matrix.env }}
       - uses: actions/upload-artifact@v4
         with:

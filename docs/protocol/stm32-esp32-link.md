@@ -283,8 +283,8 @@ response `OK` only means "scheduled". The result arrives per channel as
 | `mask` | u16 | channels to stop |
 
 A running move or calibration is aborted, and pending jobs for these channels
-are discarded. An aborted move leaves the position inaccurate; the channel then
-gets the `POS_UNCERTAIN` flag (see 5.4).
+are discarded. Pulses are counted until the motor has come to rest, so the
+position stays known; the target is set to the position reached.
 
 #### `0x14 SET_CHANNELS`
 
@@ -300,8 +300,16 @@ Stored persistently.
 |---|---|---|
 | `mask` | u16 | channels whose connection is checked |
 
-Checks with a short test pulse (without changing the position) whether a motor
-is connected. The result arrives as `EVT_VALVE`.
+Checks whether a motor is connected with a short test move of 30 pulses
+(≈ 0.2 % of a stroke) in opening direction; if no pulse arrives (valve
+already fully open), the test is repeated in closing direction. The pulses
+are accounted for, so the position does not get lost. The result arrives as
+`EVT_VALVE`.
+
+The same detection runs automatically for every enabled channel after boot,
+for newly enabled channels and every 10 minutes for channels that are
+`NOT_CONNECTED`. A connected channel without calibration data is calibrated
+automatically.
 
 #### `0x16 GET_VALVE_DETAIL`
 Request: `channel` (u8). Response:
@@ -338,6 +346,13 @@ Shared by all channels. Fields:
 | `move_timeout_s` | u16 | 10…600 | 120 | maximum duration of a single move |
 | `min_stroke_counts` | u16 | 100…60000 | 3000 | minimum pulses for a valid stroke |
 | `max_calib_retries` | u8 | 0…5 | 2 | retries after a failed calibration |
+
+Endstop detection: after the inrush blanking the filtered current is
+compared with `mean × factor/10` (capped at `endstop_abs_ma`); 20
+consecutive samples (1 kHz) above the threshold stop the motor. Without a
+learned mean (first calibration) the mean of the first 300 ms after the
+blanking is used. In addition a motor that draws current but delivers no
+pulse for 1 s has stalled, which also counts as an endstop.
 
 On `SET` all fields are validated. The first invalid field is reported with
 `ERR_RANGE` and its field index (0-based, in table order); nothing is applied
@@ -392,7 +407,7 @@ ESP asks again with a higher `offset`.
 |---|---|---|
 | 0 | `CALIBRATED` | valid calibration data present |
 | 1 | `CALIB_PENDING` | calibration scheduled |
-| 2 | `POS_UNCERTAIN` | position not reliable (aborted move, boot without reference run) |
+| 2 | `POS_UNCERTAIN` | position not known (no reference run since boot, or lost after a fault) |
 | 3 | `AT_ENDSTOP` | endstop detected during the last move |
 | 4 | `FAILSAFE` | target comes from `failsafe_pos` |
 
@@ -404,12 +419,12 @@ Bits 5–7 are reserved (0).
 |---|---|---|
 | `0` | NONE | no fault |
 | `1` | OPEN_CIRCUIT | no current, motor unplugged |
-| `2` | BLOCKED | endstop reached well before the expected end of stroke, repeatedly |
+| `2` | BLOCKED | endstop reached more than 15 % before the expected end of stroke, twice in a row (a single occurrence schedules a calibration) |
 | `3` | TIMEOUT | `move_timeout_s` exceeded |
-| `4` | OVERCURRENT | `endstop_abs_ma` exceeded right after the inrush blanking |
+| `4` | OVERCURRENT | current above the hard limit of 250 mA for 3 ms (e.g. short circuit), checked from the first sample on |
 | `5` | CALIB_FAILED | stroke < `min_stroke_counts` after all retries |
-| `6` | NO_PULSES | current flows but no back-EMF pulses arrive |
-| `7` | COUNT_MISMATCH | pulses during the reference run differ by > 15 % |
+| `6` | NO_PULSES | current flows but not a single back-EMF pulse arrives (detection in both directions, or a move to an intermediate position) |
+| `7` | COUNT_MISMATCH | the reference run counted more than the learned closing stroke + 15 %; reported in `last_fault`, a calibration is scheduled |
 
 #### `SensorValue` (16 bytes)
 
@@ -437,13 +452,13 @@ Request: empty. Response:
 | `rx_overflow` | u16 | |
 | `rx_bad_version` | u16 | |
 | `rx_duplicate` | u16 | repetitions answered via 4.3 |
-| `uart_hw_err` | u16 | framing or overrun errors of the UART hardware |
+| `uart_hw_err` | u16 | framing or overrun errors of the UART hardware (not implemented yet: 0) |
 | `ow_crc_err` | u16 | |
 | `ow_bus_err` | u16 | bus short circuit, no presence pulse |
 | `eeprom_writes` | u32 | |
 | `eeprom_err` | u16 | |
 | `loop_max_us` | u32 | longest main loop pass since boot |
-| `mcu_temp_c10` | i16 | internal STM32 temperature, 0.1 °C |
+| `mcu_temp_c10` | i16 | internal STM32 temperature, 0.1 °C (not implemented yet: 0) |
 
 #### `0x41 CLEAR_DIAG`
 Request: empty. Resets the counters; uptime and the EEPROM counters are kept.
@@ -474,16 +489,24 @@ operation.
 - The STM32 keeps operating with its last stored configuration (system, motor,
   channels) even without the ESP.
 - After boot:
-  1. Every enabled channel with valid calibration performs a **reference run**
-     towards closed until the endstop.
-  2. Then it moves to `startup_pos`.
-  3. If the pulse count of the reference run deviates from the expected value,
-     the STM32 sets `POS_UNCERTAIN` and schedules a calibration.
+  1. Every enabled channel is checked with a detection move (see `DETECT`).
+  2. A connected channel with valid calibration performs a **reference run**
+     towards closed until the endstop; one without calibration is calibrated.
+  3. Then it moves to its target: `startup_pos`, or the last stored target
+     if `startup_pos` = `0xFFFF` (targets are stored at most every 10 minutes;
+     without any stored target the failsafe position is used).
+  4. If the reference run counts more pulses than the learned closing stroke
+     + 15 %, the STM32 reports `COUNT_MISMATCH` in `last_fault` and schedules
+     a calibration.
+- Only one motor moves at a time; channels with pending work report
+  `QUEUED`. The valve power supply is switched on 1 s before the first move
+  and off 10 s after the last one.
 - If `link_timeout_s` ≠ 0 and no valid request arrives for that long:
   - If `failsafe_pos` ≠ `0xFFFF`, every channel is moved there, with the
     `FAILSAFE` flag set.
   - The first valid request afterwards ends the failsafe state. The targets
     stay unchanged until the ESP sends new ones.
+  - Failsafe targets are never stored in the EEPROM.
 
 ---
 

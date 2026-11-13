@@ -120,19 +120,36 @@ are attached to GitHub releases (built by CI).
   git history and in the upstream releases).
 
 ### Phase 1 – STM32 firmware (most critical part)
-- HAL layer; defined pin states immediately after reset (motors off, PSU off).
-- `MotorChannel` state machine with `tick()`; ISRs only deliver raw data
-  (pulse counter, current samples) via atomic/volatile hand-over.
-- Position tracking from counted pulses, separate factors for opening/closing,
-  dead zone taken into account, fixed point instead of an integer scaler.
-- Robust endstop/undercurrent detection (consecutive counters, plausibility limits).
-- Calibration data + last position persisted (EEPROM record, version + CRC,
-  wear-friendly). After boot: reference run instead of a full re-learn.
-- Non-blocking 1-Wire scheduler, sensors addressed only by ROM id.
-- IWDG, BOR level, reset cause, error counters.
-- Protocol server.
-- Host tests for the state machine, calibration evaluation, storage.
-- **Hardware test on the owner's board.**
+
+Done:
+- `src/core` (hardware independent, host tested):
+  - `MotorRun`: one movement in interrupt context – current filter,
+    inrush blanking, endstop by current (learned or measured reference,
+    capped by the absolute limit) or by stall, open circuit (consecutive
+    samples), hard overcurrent limit, timeout; stops the driver directly in
+    the interrupt and counts coasting pulses.
+  - `ValveManager`: 12 channels, one motor at a time, PSU and MUX settle
+    times, jobs detect → calibrate → reference → move, position from
+    counted pulses with separate opening/closing strokes, endstop moves
+    re-reference, unexpected endstop → recalibration / `BLOCKED`, fault
+    retry every 6 h, re-detection every 10 min, recalibration after
+    moves/days.
+  - `Storage`: EEPROM records with A/B slots, sequence number and CRC,
+    non-blocking page writes, power-loss safe.
+  - `LinkServer` + `Controller`: all protocol v1 requests, duplicate
+    protection, events, boot handshake, failsafe, lazy persistence.
+- `src/board`: pins (C1/C2), motor driver, 1 kHz sampling (TIM11) and pulse
+  interrupt at equal priority, 24LC64 EEPROM, USART1 with 512-byte buffers,
+  IWDG (2 s), reset cause, MCU UID.
+- 49 host tests with a valve simulator (asymmetric strokes, coasting,
+  obstruction, disconnected motor, missing pulses, endless motor), including
+  150 random moves without drift and end-to-end protocol tests.
+
+Open:
+- 1-Wire sensors (non-blocking scheduler, sensors by ROM id).
+- BOR level (option bytes), UART error counters, MCU temperature.
+- **Hardware test on the owner's board** (flash via the ESP32 once phase 2
+  provides the update path, or via USB DFU / ST-Link).
 
 ### Phase 2 – ESP32 core
 - FreeRTOS tasks with clear responsibilities instead of TaskManagerIO/`yieldTask`.
