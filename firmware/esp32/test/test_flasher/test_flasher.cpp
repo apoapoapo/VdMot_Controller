@@ -35,9 +35,51 @@ static void test_flash_and_verify(void)
     /* back in the application, normal UART settings */
     TEST_ASSERT_FALSE(bl.boot0);
     TEST_ASSERT_FALSE(bl.reset);
-    TEST_ASSERT_EQUAL_INT(1, bl.app_starts);
+    TEST_ASSERT_FALSE(bl.in_bootloader); /* application started again */
     TEST_ASSERT_EQUAL_UINT32(115200, bl.baud);
     TEST_ASSERT_FALSE(bl.parity);
+}
+
+static void test_software_entry_without_boot0(void)
+{
+    /* C2/C3 boards: BOOT0 is not wired, the application jumps to the
+     * bootloader on request (legacy 1.x and v2 firmware) */
+    FakeBootloader bl;
+    bl.boot0_wired = false;
+    MemImage img = makeImage(20000);
+    Stm32Flasher f;
+    TEST_ASSERT_EQUAL(FlashResult::Ok, f.flash(bl, img));
+    TEST_ASSERT_EQUAL_INT(1, bl.software_entries);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(img.data.data(), bl.flash.data(), img.data.size());
+}
+
+static void test_already_in_bootloader(void)
+{
+    FakeBootloader bl;
+    bl.boot0_wired = false;
+    bl.app_present = false;
+    bl.start_in_bootloader = true;
+    bl.init();
+    MemImage img = makeImage(8192);
+    Stm32Flasher f;
+    TEST_ASSERT_EQUAL(FlashResult::Ok, f.flash(bl, img));
+    TEST_ASSERT_EQUAL_INT(0, bl.software_entries);
+}
+
+static void test_boot0_fallback_for_blank_chip(void)
+{
+    /* no application (e.g. after an interrupted update): only BOOT0 helps */
+    FakeBootloader bl;
+    bl.app_present = false;
+    MemImage img = makeImage(8192);
+    Stm32Flasher f;
+    TEST_ASSERT_EQUAL(FlashResult::Ok, f.flash(bl, img));
+
+    FakeBootloader unwired;
+    unwired.app_present = false;
+    unwired.boot0_wired = false;
+    TEST_ASSERT_EQUAL(FlashResult::NoBootloader, f.flash(unwired, img));
+    TEST_ASSERT_FALSE(unwired.boot0);
 }
 
 static void test_large_image_erases_more_sectors(void)
@@ -75,6 +117,7 @@ static void test_no_bootloader(void)
 static void test_fallback_baud_rate(void)
 {
     FakeBootloader bl;
+    bl.app_present = false; /* BOOT0 path, which also tries 57600 baud */
     bl.accept_baud = 57600;
     MemImage img = makeImage(8192);
     Stm32Flasher f;
@@ -123,6 +166,9 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_flash_and_verify);
+    RUN_TEST(test_software_entry_without_boot0);
+    RUN_TEST(test_already_in_bootloader);
+    RUN_TEST(test_boot0_fallback_for_blank_chip);
     RUN_TEST(test_large_image_erases_more_sectors);
     RUN_TEST(test_bad_image_is_rejected_untouched);
     RUN_TEST(test_no_bootloader);

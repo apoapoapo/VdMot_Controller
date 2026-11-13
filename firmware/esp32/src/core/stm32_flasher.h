@@ -2,9 +2,15 @@
  * Stm32Flasher - programs the STM32 through its ROM bootloader over the
  * link UART (ST application note AN3155, USART protocol).
  *
- * The ESP32 drives BOOT0 and NRST, so no button needs to be pressed and
- * the STM32 application does not need to cooperate (a broken firmware can
- * always be replaced).
+ * Entering the bootloader, in this order:
+ *  1. the STM32 is already in the bootloader (answers the sync byte)
+ *  2. software entry: reset the STM32 (NRST) and send "DEADBEEF" during the
+ *     boot window of the running application; it answers "BEEFIT" and
+ *     jumps to the ROM bootloader. Both the legacy 1.x and the v2 STM32
+ *     firmware support this. BOOT0 is not wired to the ESP32 on the C2/C3
+ *     boards, so this is the normal path.
+ *  3. BOOT0 high + reset: only works if BOOT0 is wired (solder pad next to
+ *     the ESP32 connector) or the BOOT0 button is held.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
@@ -75,7 +81,10 @@ class Stm32Flasher
     static void runApplication(BootPort &port);
 
   private:
-    bool sync(BootPort &port);
+    bool enterBootloader(BootPort &port);
+    bool probeSync(BootPort &port);
+    bool softwareEntry(BootPort &port);
+    bool boot0Entry(BootPort &port);
     bool command(BootPort &port, uint8_t cmd, uint32_t timeout_ms = 1000);
     bool sendWithChecksum(BootPort &port, const uint8_t *data, size_t len, uint32_t timeout_ms);
     bool sendAddress(BootPort &port, uint32_t addr);

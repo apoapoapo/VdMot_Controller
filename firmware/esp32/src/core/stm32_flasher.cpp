@@ -91,11 +91,55 @@ void Stm32Flasher::runApplication(BootPort &port)
     port.drain();
 }
 
-bool Stm32Flasher::sync(BootPort &port)
+bool Stm32Flasher::probeSync(BootPort &port)
+{
+    port.drain();
+    uint8_t b = kSync;
+    port.write(&b, 1);
+    int r = port.read(200);
+    return r == kAck || r == kNack; /* NACK: already synchronised */
+}
+
+bool Stm32Flasher::softwareEntry(BootPort &port)
+{
+    static const char kRequest[] = "DEADBEEF\r\n";
+    static const char kAnswer[] = "BEEFIT";
+    for (int attempt = 0; attempt < 2; attempt++) {
+        port.setBoot0(false);
+        port.begin(115200, true);
+        port.setReset(true);
+        port.delayMs(150);
+        port.setReset(false);
+        port.delayMs(300);
+        port.drain();
+        size_t match = 0;
+        /* the boot window of the application lasts about 2-3 s */
+        for (int i = 0; i < 10; i++) {
+            port.write(reinterpret_cast<const uint8_t *>(kRequest), sizeof(kRequest) - 1);
+            int c;
+            while ((c = port.read(250)) >= 0) {
+                match = c == kAnswer[match] ? match + 1 : (c == kAnswer[0] ? 1 : 0);
+                if (match == sizeof(kAnswer) - 1) {
+                    port.delayMs(300); /* bootloader start-up */
+                    for (int s = 0; s < 5; s++) {
+                        if (probeSync(port)) {
+                            return true;
+                        }
+                        port.delayMs(100);
+                    }
+                    return false;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+bool Stm32Flasher::boot0Entry(BootPort &port)
 {
     static const uint32_t kBauds[] = {115200, 57600};
     for (uint32_t baud : kBauds) {
-        for (int attempt = 0; attempt < 3; attempt++) {
+        for (int attempt = 0; attempt < 2; attempt++) {
             port.setBoot0(true);
             port.delayMs(10);
             port.setReset(true);
@@ -103,16 +147,20 @@ bool Stm32Flasher::sync(BootPort &port)
             port.setReset(false);
             port.delayMs(150); /* bootloader start-up */
             port.begin(baud, true);
-            port.drain();
-            uint8_t b = kSync;
-            port.write(&b, 1);
-            int r = port.read(200);
-            if (r == kAck || r == kNack) { /* NACK: already synchronised */
+            if (probeSync(port)) {
                 return true;
             }
         }
     }
+    port.setBoot0(false);
     return false;
+}
+
+bool Stm32Flasher::enterBootloader(BootPort &port)
+{
+    port.setBoot0(false);
+    port.begin(115200, true);
+    return probeSync(port) || softwareEntry(port) || boot0Entry(port);
 }
 
 bool Stm32Flasher::command(BootPort &port, uint8_t cmd, uint32_t timeout_ms)
@@ -239,7 +287,7 @@ FlashResult Stm32Flasher::flash(BootPort &port, ImageSource &image, Progress pro
     }
 
     report(progress, ctx, 0, "connecting");
-    if (!sync(port)) {
+    if (!enterBootloader(port)) {
         runApplication(port);
         return FlashResult::NoBootloader;
     }

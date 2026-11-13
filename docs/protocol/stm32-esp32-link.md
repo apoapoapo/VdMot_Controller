@@ -34,9 +34,22 @@ This document specifies the protocol on the UART link between the ESP32
 | Baud rate | 115200 (default); possibly 460800 later via `SET_LINK` – not part of v1 |
 | Reset / boot | The ESP32 drives the STM32's NRST (GPIO15) and BOOT0 (GPIO14), as today |
 
-The STM32 firmware is still updated via the **ROM bootloader** (AN3155) on the
-same UART: the ESP32 asserts BOOT0, pulses NRST and then speaks the ST
-bootloader protocol. The 3-second "DEADBEEF" window of firmware 1.x is dropped.
+The STM32 firmware is updated via the **ROM bootloader** (AN3155) on the
+same UART. **BOOT0 is not wired to the ESP32** on the C2/C3 boards (GPIO14
+only goes to an open solder pad), so the bootloader is entered by software,
+compatible with the legacy 1.x firmware:
+
+1. The ESP32 resets the STM32 (NRST) and sends `DEADBEEF\r\n` at
+   115200 baud **8E1** every 250 ms.
+2. During the first **2 seconds** after a reset the STM32 firmware listens
+   for this string (legacy 1.x: 3 seconds). On a match it answers
+   `BEEFIT\r\n` and jumps to the ROM bootloader.
+3. The ESP32 then speaks the ST bootloader protocol (sync byte `0x7F`).
+
+If the STM32 is already in the bootloader, step 1 is skipped. If no
+application answers (e.g. after an interrupted update), the ESP32 finally
+tries BOOT0 + reset; that only works if BOOT0 is wired via the solder pad or
+the BOOT0 button of the BlackPill is held.
 
 ---
 

@@ -28,6 +28,7 @@ namespace
 {
 
 constexpr uint32_t kWatchdogUs = 2000000; /* 2 s */
+constexpr uint32_t kBootWindowMs = 2000;
 
 board::Motor motor;
 board::Eeprom eeprom;
@@ -49,6 +50,9 @@ void setup()
     uint8_t reset_cause = board::readResetCause();
 
     pinMode(pinNametoDigitalPin(board::kLed), OUTPUT);
+    /* firmware update request from the ESP32? (does not return then) */
+    board::bootWindow(kBootWindowMs);
+
     eeprom.begin();
     onewire_bus.begin();
     link_port.begin();

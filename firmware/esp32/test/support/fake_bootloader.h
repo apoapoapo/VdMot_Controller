@@ -16,8 +16,12 @@ class FakeBootloader : public vdm::BootPort
   public:
     std::vector<uint8_t> flash;
     uint16_t chip_id = 0x431;
-    uint32_t accept_baud = 0;  /* 0: any */
-    bool silent = false;       /* no bootloader at all */
+    uint32_t accept_baud = 0; /* 0: any */
+    bool silent = false;      /* no bootloader at all */
+    bool boot0_wired = true;  /* BOOT0 reaches the STM32 */
+    bool app_present = true;  /* an application with a DEADBEEF boot window runs */
+    bool start_in_bootloader = false;
+    int software_entries = 0;
     int nack_writes = 0;       /* NACK the next n write data phases */
     bool corrupt_read = false; /* flip a bit in read data */
     bool boot0 = false;
@@ -59,13 +63,23 @@ class FakeBootloader : public vdm::BootPort
     void setReset(bool a) override
     {
         if (reset && !a) { /* released */
-            in_bootloader = boot0 && !silent;
+            bool b0 = boot0 && boot0_wired;
+            in_bootloader = b0 && !silent;
             state_ = St::Sync;
             out_.clear();
-            if (!boot0)
+            app_window_ = !b0 && app_present;
+            app_match_ = 0;
+            if (!b0)
                 app_starts++;
         }
         reset = a;
+    }
+    void init()
+    {
+        if (start_in_bootloader) {
+            in_bootloader = true;
+            state_ = St::Sync;
+        }
     }
     void delayMs(uint32_t) override {}
 
@@ -91,8 +105,22 @@ class FakeBootloader : public vdm::BootPort
 
     void onByte(uint8_t b)
     {
-        if (!in_bootloader)
+        if (!in_bootloader) {
+            /* application boot window: 115200 8E1, "DEADBEEF" -> "BEEFIT" */
+            static const char kReq[] = "DEADBEEF";
+            if (!app_window_ || baud != 115200 || !parity || silent)
+                return;
+            app_match_ = b == (uint8_t)kReq[app_match_] ? app_match_ + 1 : (b == 'D' ? 1 : 0);
+            if (app_match_ == 8) {
+                for (const char *p = "BEEFIT\r\n"; *p; p++)
+                    out_.push_back((uint8_t)*p);
+                app_window_ = false;
+                in_bootloader = true;
+                state_ = St::Sync;
+                software_entries++;
+            }
             return;
+        }
         switch (state_) {
         case St::Sync:
             if (b == 0x7F && parity && (accept_baud == 0 || accept_baud == baud)) {
@@ -210,6 +238,8 @@ class FakeBootloader : public vdm::BootPort
         }
     }
 
+    bool app_window_ = false;
+    size_t app_match_ = 0;
     St state_ = St::Sync;
     uint8_t cmd_ = 0;
     std::vector<uint8_t> buf_;

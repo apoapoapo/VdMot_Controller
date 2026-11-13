@@ -71,6 +71,12 @@ class System : public vdm::SystemPort
 /* Starts the 1 kHz current sampling and the pulse interrupt for `run`. */
 void startSampling(vdm::MotorRun &run);
 
+/* Boot window for firmware updates: listens on the ESP32 UART (115200 8E1)
+ * for "DEADBEEF", answers "BEEFIT" and jumps to the ROM bootloader. Same
+ * handshake as the legacy 1.x firmware, needed because BOOT0 is not wired
+ * to the ESP32 on the C2/C3 boards. Returns after `window_ms` otherwise. */
+void bootWindow(uint32_t window_ms);
+
 /* Reset cause (vdm_reset_cause_t); reads and clears the RCC flags. */
 uint8_t readResetCause();
 void readUid(uint8_t (&uid)[12]);

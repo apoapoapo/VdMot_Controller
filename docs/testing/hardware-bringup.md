@@ -43,10 +43,14 @@ every 5 minutes (it assumes a hang), which does no harm.
 1. Section **Firmware** → STM32 image → choose the v2 STM32 `firmware.bin`
    for your chip → **Flash STM32**.
 2. Progress: connecting → erasing → writing → verifying → done. The result
-   line shows the detected chip. Flashing goes through the STM32's ROM
-   bootloader (BOOT0/NRST driven by the ESP32), so it also works if the
-   STM32 firmware is broken – a failed attempt can simply be repeated.
-3. The link changes to **connected**, the header shows both versions.
+   line shows the detected chip. The ESP32 resets the STM32 and asks the
+   running firmware (legacy 1.x or v2) to jump to the ROM bootloader
+   ("DEADBEEF" handshake) – BOOT0 is not wired on the C2/C3 boards.
+3. If the STM32 has no working firmware any more (e.g. an update was
+   interrupted while writing), the handshake cannot work: hold the **BOOT0
+   button** on the BlackPill and click **Flash STM32** again; release it
+   when the progress shows *erasing*.
+4. The link changes to **connected**, the header shows both versions.
 
 ## 4. What happens next (automatically)
 

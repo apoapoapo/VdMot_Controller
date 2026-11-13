@@ -161,8 +161,10 @@ Done (2a, bring-up for the first hardware test):
 - `src/core` (host tested): `LinkClient` (handshake, stop-and-wait with
   retries, polling, events, gap detection, user targets resent after an
   STM32 restart, hard-reset request when the STM32 stays silent) and
-  `Stm32Flasher` (AN3155: BOOT0/NRST, 8E1 sync with baud fallback, chip id,
-  sector erase, 256-byte writes with retry, read-back verification).
+  `Stm32Flasher` (AN3155: bootloader entry via the legacy-compatible
+  "DEADBEEF" handshake – BOOT0 is not wired on C2/C3 – with BOOT0 as
+  fallback, chip id, sector erase, 256-byte writes with retry, read-back
+  verification).
 - Integration test: `LinkClient` against the real STM32 core with valve,
   1-Wire and EEPROM simulators over a wire that drops and corrupts bytes.
 - `src/app`: link task (UART, LinkClient, STM32 update from LittleFS),

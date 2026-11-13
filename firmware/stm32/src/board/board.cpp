@@ -281,6 +281,60 @@ void System::loopTime(uint32_t us)
     }
 }
 
+namespace
+{
+
+[[noreturn]] void jumpToBootloader()
+{
+    constexpr uint32_t kSystemMemory = 0x1FFF0000u; /* STM32F4, AN2606 */
+    HAL_RCC_DeInit();
+    SysTick->CTRL = 0;
+    SysTick->LOAD = 0;
+    SysTick->VAL = 0;
+    __disable_irq();
+    for (uint32_t i = 0; i < sizeof(NVIC->ICER) / sizeof(NVIC->ICER[0]); i++) {
+        NVIC->ICER[i] = 0xFFFFFFFFu;
+        NVIC->ICPR[i] = 0xFFFFFFFFu;
+    }
+    __HAL_RCC_SYSCFG_CLK_ENABLE();
+    __HAL_SYSCFG_REMAPMEMORY_SYSTEMFLASH();
+    uint32_t sp = *reinterpret_cast<volatile uint32_t *>(kSystemMemory);
+    uint32_t pc = *reinterpret_cast<volatile uint32_t *>(kSystemMemory + 4u);
+    __set_MSP(sp);
+    __enable_irq();
+    reinterpret_cast<void (*)()>(pc)();
+    for (;;) {
+    }
+}
+
+} // namespace
+
+void bootWindow(uint32_t window_ms)
+{
+    static const char kRequest[] = "DEADBEEF";
+    Serial1.setRx(kLinkRx);
+    Serial1.setTx(kLinkTx);
+    Serial1.begin(115200, SERIAL_8E1);
+    size_t match = 0;
+    uint32_t start = millis();
+    while (millis() - start < window_ms) {
+        digitalWriteFast(kLed, (millis() / 50u) % 2u ? HIGH : LOW);
+        int c = Serial1.read();
+        if (c < 0) {
+            continue;
+        }
+        match = c == kRequest[match] ? match + 1u : (c == kRequest[0] ? 1u : 0u);
+        if (match == sizeof(kRequest) - 1u) {
+            Serial1.print("BEEFIT\r\n");
+            Serial1.flush();
+            delay(50);
+            Serial1.end();
+            jumpToBootloader();
+        }
+    }
+    Serial1.end();
+}
+
 uint8_t readResetCause()
 {
     uint32_t csr = RCC->CSR;
