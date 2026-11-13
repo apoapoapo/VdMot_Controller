@@ -567,13 +567,19 @@ void ValveManager::enterFault(uint8_t ch, uint8_t fault, uint32_t now_ms)
 void ValveManager::enterNotConnected(uint8_t ch, uint32_t now_ms)
 {
     Channel &c = ch_[ch];
-    c.mode = VDM_MODE_NOT_CONNECTED;
     c.fault = VDM_FAULT_NONE;
     c.last_fault = VDM_FAULT_OPEN_CIRCUIT;
     c.pos_known = false;
     c.at_endstop = false;
     c.want_detect = false;
-    c.retry_at_ms = now_ms + kRedetectMs;
+    /* back-off while the channel stays empty */
+    if (c.mode == VDM_MODE_NOT_CONNECTED && c.redetect_ms != 0) {
+        c.redetect_ms = c.redetect_ms * 2u > kRedetectMaxMs ? kRedetectMaxMs : c.redetect_ms * 2u;
+    } else {
+        c.redetect_ms = kRedetectMinMs;
+    }
+    c.mode = VDM_MODE_NOT_CONNECTED;
+    c.retry_at_ms = now_ms + c.redetect_ms;
     c.retry_armed = true;
     markChanged(ch);
 }
@@ -627,8 +633,9 @@ void ValveManager::onRunDone(const RunResult &r, uint32_t now_ms)
         case Job::None:
             break;
         }
-        if (!continue_job && !handled && c.mode != VDM_MODE_FAULT &&
-            c.mode != VDM_MODE_NOT_CONNECTED && faultFor(r.outcome) != VDM_FAULT_NONE) {
+        /* calibration failures are handled by finishCalibrationStep() */
+        if (!continue_job && !handled && job_ != Job::Calibrate &&
+            faultFor(r.outcome) != VDM_FAULT_NONE) {
             handleFailure(r, now_ms);
         }
     }

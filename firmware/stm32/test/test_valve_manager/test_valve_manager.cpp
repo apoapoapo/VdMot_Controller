@@ -142,9 +142,9 @@ static void test_not_connected_channel(void)
     TEST_ASSERT_EQUAL_UINT16(VDM_POS_UNKNOWN, st(r, 1).actual);
     TEST_ASSERT_EQUAL_UINT8(VDM_FAULT_OPEN_CIRCUIT, r.vm.detail(1).last_fault);
 
-    /* plugged in later: found by the periodic re-detection */
+    /* plugged in later: found by the re-detection, the first one after 1 min */
     r.board.v[1].connected = true;
-    r.runMs(vdm::ValveManager::kRedetectMs);
+    r.runMs(vdm::ValveManager::kRedetectMinMs + 5000);
     TEST_ASSERT_TRUE(r.settle());
     TEST_ASSERT_EQUAL_UINT8(VDM_MODE_IDLE, st(r, 1).mode);
     assertPositionMatches(r, 1, 6);
@@ -163,6 +163,19 @@ static void test_interference_pulses_without_motor(void)
     while (r.vm.popCalibrationEvent(evt)) {
         TEST_ASSERT_EQUAL_UINT8(0, evt.channel); /* no calibration attempt on channel 1 */
     }
+}
+
+static void test_redetection_backs_off(void)
+{
+    Rig r(0x0002);
+    r.board.v[1].connected = false;
+    TEST_ASSERT_TRUE(r.settle());
+    uint32_t moves = r.board.v[1].moves;
+    /* checks after 1, 2, 4, 8, 15, 15 ... minutes */
+    r.runMs(60u * 60u * 1000u);
+    uint32_t checks = r.board.v[1].moves - moves;
+    TEST_ASSERT_TRUE(checks >= 6 && checks <= 9);
+    TEST_ASSERT_EQUAL_UINT8(VDM_MODE_NOT_CONNECTED, st(r, 1).mode);
 }
 
 static void test_short_stroke_fails_calibration(void)
@@ -364,6 +377,7 @@ int main(void)
     RUN_TEST(test_only_one_motor_at_a_time_and_all_channels_served);
     RUN_TEST(test_not_connected_channel);
     RUN_TEST(test_interference_pulses_without_motor);
+    RUN_TEST(test_redetection_backs_off);
     RUN_TEST(test_short_stroke_fails_calibration);
     RUN_TEST(test_obstruction_after_calibration_is_detected);
     RUN_TEST(test_no_pulses_is_a_fault);

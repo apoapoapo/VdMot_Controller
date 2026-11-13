@@ -55,7 +55,10 @@ class ValveManager
      * pulses on the back-EMF input */
     static constexpr uint16_t kDetectMinPeakMa10 = 50;
     static constexpr uint32_t kDetectTimeoutMs = 3000;
-    static constexpr uint32_t kRedetectMs = 10UL * 60UL * 1000UL; /* not connected */
+    /* re-detection of a channel without valve: after 1 min, then doubling
+     * up to 15 min */
+    static constexpr uint32_t kRedetectMinMs = 60UL * 1000UL;
+    static constexpr uint32_t kRedetectMaxMs = 15UL * 60UL * 1000UL;
     static constexpr uint32_t kFaultRetryMs = 6UL * 60UL * 60UL * 1000UL;
     static constexpr int32_t kBlockedMarginPpm = 150000; /* 15 % */
     static constexpr uint32_t kLiveEventMs = 500;
@@ -146,6 +149,7 @@ class ValveManager
         uint8_t blocked_cnt = 0;
         uint8_t calib_retries = 0;
         uint32_t retry_at_ms = 0;
+        uint32_t redetect_ms = 0; /* current re-detection interval */
         bool retry_armed = false;
         uint16_t peak_ma10 = 0;
         uint16_t last_ma10 = 0;

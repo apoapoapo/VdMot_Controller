@@ -358,6 +358,53 @@ void LinkClient::setError(const char *what, uint8_t status, uint8_t detail)
     snprintf(last_error_, sizeof(last_error_), "%s: status %u, detail %u", what, status, detail);
 }
 
+namespace
+{
+
+const char *faultName(uint8_t f)
+{
+    static const char *const kFaults[] = {"none",      "open circuit",  "blocked",
+                                          "timeout",   "overcurrent",   "stroke too short",
+                                          "no pulses", "count mismatch"};
+    return f <= VDM_FAULT_LAST ? kFaults[f] : "?";
+}
+
+} // namespace
+
+/* stores a valve state and logs real changes of the connection/fault state
+ * (not the first detection after a start) */
+void LinkClient::storeValve(const vdm_valve_state_t &s, uint32_t now_ms)
+{
+    vdm_valve_state_t &old = model_.valves[s.channel];
+    uint16_t bit = static_cast<uint16_t>(1u << s.channel);
+    /* only channels that had a working valve before: no entries for empty
+     * channels while they are detected after a start */
+    bool known = (seen_ready_ & bit) != 0;
+    if (s.mode == VDM_MODE_IDLE) {
+        seen_ready_ |= bit;
+    }
+    bool was_nc = old.mode == VDM_MODE_NOT_CONNECTED;
+    bool was_fault = old.mode == VDM_MODE_FAULT;
+    bool working = s.mode >= VDM_MODE_IDLE && s.mode <= VDM_MODE_QUEUED;
+    char text[64];
+    int n = 0;
+    uint8_t level = VDM_LOG_INFO;
+    if (known && s.mode == VDM_MODE_NOT_CONNECTED && !was_nc) {
+        n = snprintf(text, sizeof(text), "valve %u not connected", s.channel + 1u);
+        level = VDM_LOG_WARN;
+    } else if (known && s.mode == VDM_MODE_FAULT && (!was_fault || old.fault != s.fault)) {
+        n = snprintf(text, sizeof(text), "valve %u fault: %s", s.channel + 1u, faultName(s.fault));
+        level = VDM_LOG_WARN;
+    } else if (known && (was_nc || was_fault) && working) {
+        n = snprintf(text, sizeof(text), "valve %u %s", s.channel + 1u,
+                     was_nc ? "connected again" : "fault cleared");
+    }
+    if (n > 0) {
+        model_.addLog(now_ms, level, text, static_cast<size_t>(n));
+    }
+    old = s;
+}
+
 void LinkClient::storeSensors(const vdm_sensors_t &s)
 {
     model_.sensor_total = s.total > Model::kMaxSensors ? Model::kMaxSensors : s.total;
@@ -408,7 +455,7 @@ void LinkClient::onResponse(const vdm_frame_t &f, uint32_t now_ms)
         vdm_valve_states_t s;
         if (status == VDM_OK && vdm_dec_valve_states(body, body_len, &s, nullptr) == VDM_OK) {
             for (uint8_t i = 0; i < s.count; i++) {
-                model_.valves[s.valves[i].channel] = s.valves[i];
+                storeValve(s.valves[i], now_ms);
             }
             model_.valves_valid = true;
         }
@@ -550,7 +597,7 @@ void LinkClient::onEvent(const vdm_frame_t &f, uint32_t now_ms)
     case VDM_EVT_VALVE: {
         vdm_valve_state_t s;
         if (vdm_dec_valve_state(f.payload, f.len, &s, nullptr) == VDM_OK) {
-            model_.valves[s.channel] = s;
+            storeValve(s, now_ms);
         }
         return;
     }
@@ -566,12 +613,8 @@ void LinkClient::onEvent(const vdm_frame_t &f, uint32_t now_ms)
                              c.channel + 1u, static_cast<unsigned long>(c.open_counts),
                              static_cast<unsigned long>(c.close_counts));
             } else {
-                static const char *const kFaults[] = {
-                    "none",        "open circuit",     "blocked",   "timeout",
-                    "overcurrent", "stroke too short", "no pulses", "count mismatch"};
-                const char *name = c.result <= VDM_FAULT_LAST ? kFaults[c.result] : "?";
                 n = snprintf(text, sizeof(text), "valve %u calibration failed: %s", c.channel + 1u,
-                             name);
+                             faultName(c.result));
             }
             model_.addLog(now_ms, c.result == VDM_FAULT_NONE ? VDM_LOG_INFO : VDM_LOG_WARN, text,
                           n > 0 ? static_cast<size_t>(n) : 0u);

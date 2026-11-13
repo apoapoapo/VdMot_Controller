@@ -325,10 +325,12 @@ already fully open), the test is repeated in closing direction. The pulses
 are accounted for, so the position does not get lost. The result arrives as
 `EVT_VALVE`.
 
-The same detection runs automatically for every enabled channel after boot,
-for newly enabled channels and every 10 minutes for channels that are
-`NOT_CONNECTED`. A connected channel without calibration data is calibrated
-automatically.
+The same detection runs automatically for every enabled channel after boot
+and for newly enabled channels. Channels that are `NOT_CONNECTED` are
+checked again after 1 minute, then at doubling intervals of up to 15
+minutes. A connected channel without calibration data is calibrated
+automatically. While a valve stands still it draws no current, so an
+unplugged valve is only noticed with its next move.
 
 #### `0x16 GET_VALVE_DETAIL`
 Request: `channel` (u8). Response:

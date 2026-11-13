@@ -378,6 +378,33 @@ static void test_failsafe_with_esp_restart_restores_targets(void)
     TEST_ASSERT_UINT16_WITHIN(6, 200, r.m().valves[0].actual);
 }
 
+static bool logHas(Rig &r, const char *text)
+{
+    for (uint8_t i = 0; i < r.m().log_count; i++) {
+        const vdm::LogEntry &e = r.m().log[(r.m().log_head + i) % vdm::Model::kLogSize];
+        if (strstr(e.text, text) != nullptr)
+            return true;
+    }
+    return false;
+}
+
+static void test_unplug_and_replug_are_logged(void)
+{
+    Rig r;
+    r.client.setTarget(1, 300);
+    r.runMs(5u * 60u * 1000u);
+    TEST_ASSERT_EQUAL_UINT8(VDM_MODE_IDLE, r.m().valves[1].mode);
+    TEST_ASSERT_FALSE(logHas(r, "not connected")); /* empty channels at start: no entries */
+    r.stm->board.v[1].connected = false;
+    r.client.setTarget(1, 600);
+    r.runMs(10000);
+    TEST_ASSERT_EQUAL_UINT8(VDM_MODE_NOT_CONNECTED, r.m().valves[1].mode);
+    TEST_ASSERT_TRUE(logHas(r, "valve 2 not connected"));
+    r.stm->board.v[1].connected = true;
+    r.runMs(3u * 60u * 1000u); /* re-detection after 1 min */
+    TEST_ASSERT_TRUE(logHas(r, "valve 2 connected again"));
+}
+
 static void test_suspend_for_update(void)
 {
     Rig r;
@@ -403,6 +430,7 @@ int main(void)
     RUN_TEST(test_restart_stm32_via_link);
     RUN_TEST(test_pause_link_triggers_failsafe);
     RUN_TEST(test_failsafe_with_esp_restart_restores_targets);
+    RUN_TEST(test_unplug_and_replug_are_logged);
     RUN_TEST(test_suspend_for_update);
     return UNITY_END();
 }

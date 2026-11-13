@@ -104,6 +104,7 @@ class LinkClient
     void linkDown(uint32_t now_ms);
     void setState(LinkState s, uint32_t now_ms);
     void storeSensors(const vdm_sensors_t &s);
+    void storeValve(const vdm_valve_state_t &s, uint32_t now_ms);
     void setError(const char *what, uint8_t status, uint8_t detail);
 
     ByteSink &out_;
@@ -142,6 +143,7 @@ class LinkClient
     uint16_t desired_[VDM_MAX_CHANNELS] = {};
     uint16_t desired_valid_ = 0;
     uint16_t desired_dirty_ = 0;
+    uint16_t seen_ready_ = 0; /* channels that were idle at least once since the start */
     uint16_t targets_in_flight_ = 0;
 
     char last_error_[64] = {};

@@ -70,6 +70,7 @@ class Board : public vdm::MotorPort
         if (enabled >= 0) {
             violations++; /* MUX switched under load */
         }
+        coast_left = 0; /* coasting is over long before the next selection */
         selected = ch;
         dir = d;
         select_ms = now;
@@ -119,7 +120,9 @@ class Board : public vdm::MotorPort
         if (enabled < 0) {
             if (coast_left > 0 && coast_ch >= 0) {
                 Valve &s = v[coast_ch];
-                if (s.connected && !atEnd(s) && (now % 5) == 0) {
+                if (!s.connected || atEnd(s)) {
+                    coast_left = 0; /* a stalled motor does not coast */
+                } else if ((now % 5) == 0) {
                     movePulse(s);
                     coast_left--;
                     if (!s.no_pulses) {
