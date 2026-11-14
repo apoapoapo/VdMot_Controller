@@ -460,6 +460,7 @@ void configToJson(const Config &c, JsonObject o, bool secrets)
         JsonObject so = sa.createNestedObject();
         so["id"] = s.id;
         so["name"] = s.name;
+        so["ha_name"] = s.ha_name;
         so["type"] = kSourceTypes[static_cast<uint8_t>(s.type)];
         if (s.type == SourceType::OneWire) {
             so["rom"] = s.rom;
@@ -505,6 +506,7 @@ void configToJson(const Config &c, JsonObject o, bool secrets)
     for (const ValveConfig &v : c.valves) {
         JsonObject vo = va.createNestedObject();
         vo["name"] = v.name;
+        vo["ha_name"] = v.ha_name;
         vo["zone"] = v.zone;
         vo["min_pct"] = v.min_pct;
         vo["max_pct"] = v.max_pct;
@@ -607,6 +609,7 @@ bool configFromJson(JsonObjectConst o, Config &out, char *err, size_t err_len)
         Reader r(so, "source", err, err_len);
         r.str("id", s.id, sizeof(s.id));
         r.str("name", s.name, sizeof(s.name));
+        r.str("ha_name", s.ha_name, sizeof(s.ha_name));
         r.choice("type", s.type, kSourceTypes, 2);
         s.max_age_s = s.type == SourceType::Mqtt ? 3600 : 300;
         r.str("rom", s.rom, sizeof(s.rom));
@@ -667,6 +670,7 @@ bool configFromJson(JsonObjectConst o, Config &out, char *err, size_t err_len)
         ValveConfig &v = c.valves[ch++];
         Reader r(vo, "valve", err, err_len);
         r.str("name", v.name, sizeof(v.name));
+        r.str("ha_name", v.ha_name, sizeof(v.ha_name));
         r.str("zone", v.zone, sizeof(v.zone));
         r.integer("min_pct", v.min_pct, 0, 100);
         r.integer("max_pct", v.max_pct, 0, 100);

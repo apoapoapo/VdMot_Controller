@@ -484,6 +484,10 @@ void valveCommand(const char *num, const char *payload, size_t len)
         }
     } else if (d.is<float>() || d.is<long>()) {
         pos = d.as<float>(); /* plain number */
+    } else if (len >= 4 && strncasecmp(payload, "OPEN", 4) == 0) {
+        pos = 100.0f; /* Home Assistant valve open/close */
+    } else if (len >= 5 && strncasecmp(payload, "CLOSE", 5) == 0) {
+        pos = 0.0f;
     }
     if (!(pos >= 0.0f && pos <= 100.0f)) {
         espLog(VDM_LOG_WARN, "MQTT: valve %ld: invalid command", n);

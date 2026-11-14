@@ -76,18 +76,20 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <ul class="help"><li>Enabled: channels without a valve can be switched off; the STM32 then neither detects nor moves them.</li>
 <li>Without a zone a valve is set directly (overview).</li>
 <li>Min/max limit every target; min is the minimum opening, also with heating off.</li>
+<li>Name in Home Assistant: optional; Home Assistant puts the zone device name in front. Empty = the name.</li>
 <li>Factor scales the zone output (simple hydraulic balancing between the circuits of a zone).</li>
 <li>Flow priority: valves opened first to reach the minimum total opening (Settings).</li></ul>
-<table><thead><tr><th>#</th><th>Enabled</th><th>Name</th><th>Zone</th><th>Min %</th><th>Max %</th><th>Factor %</th><th>Flow priority</th></tr></thead><tbody id="evalves"></tbody></table>
+<table><thead><tr><th>#</th><th>Enabled</th><th>Name</th><th>Name in Home Assistant</th><th>Zone</th><th>Min %</th><th>Max %</th><th>Factor %</th><th>Flow priority</th></tr></thead><tbody id="evalves"></tbody></table>
 <div class="row"><button class="p" onclick="saveValves()">Save valves</button></div></section>
 <section><h2>Temperature sources</h2>
 <ul class="help"><li>1-Wire sensors found on the bus are offered below the table.</li>
 <li>MQTT topic: the topic the value is published on, e.g. by Home Assistant or zigbee2mqtt. Empty = the default topic shown in grey, to which e.g. a Home Assistant automation can publish.</li>
 <li>JSON field: only if the payload is JSON, e.g. <code>{"temperature":21.5,"humidity":40}</code> → <code>temperature</code>; nested fields with a dot (<code>sensor.temp</code>). Empty = the payload is a plain number.</li>
+<li>Name in Home Assistant: optional shorter name; Home Assistant puts the device name in front (e.g. "VdMot Office Return"). Empty = the name.</li>
 <li>Offset: correction added to the value.</li>
 <li>Max age: after this time without a new value the source counts as stale; zones using it go to their fallback position (0 = never). Publishers that only send on change need a regular resend.</li>
 <li>Home Assistant: import the blueprint <code>blueprints/automation/vdmot/send_temperature.yaml</code> from the repository and create one automation per room with the sensor and the default topic shown below the field.</li></ul>
-<table><thead><tr><th>Name</th><th>Type</th><th>ROM id / MQTT topic</th><th>JSON field</th><th>Offset K</th><th>Max age s</th><th class="num">Value °C</th><th>State</th><th>Used by</th><th></th></tr></thead><tbody id="esources"></tbody></table>
+<table><thead><tr><th>Name</th><th>Name in Home Assistant</th><th>Type</th><th>ROM id / MQTT topic</th><th>JSON field</th><th>Offset K</th><th>Max age s</th><th class="num">Value °C</th><th>State</th><th>Used by</th><th></th></tr></thead><tbody id="esources"></tbody></table>
 <div class="row"><button onclick="addSource('mqtt')">Add MQTT source</button><button class="p" onclick="saveSources()">Save sources</button></div>
 <div class="row mut" id="unused"></div></section>
 </div>
@@ -242,6 +244,7 @@ function addZone(){collectZones();ED.zones.push({name:'Zone '+(ED.zones.length+1
 function saveZones(){collectZones();saveSection('zones',ED.zones,'Zones saved')}
 function renderValves(){$('evalves').innerHTML=CFG.valves.map((v,i)=>`<tr data-i=${i}><td>${i+1}</td><td><input type=checkbox class=en id=en${i}></td>
 <td><input class=n data-k=name value="${esc(v.name)}"></td>
+<td><input class=n data-k=ha_name value="${esc(v.ha_name||'')}" placeholder="${esc(v.name)}"></td>
 <td><select data-k=zone>${opt('','– none –',!v.zone)}${CFG.zones.map(z=>opt(z.id,z.name,z.id===v.zone)).join('')}</select></td>
 <td><input type=number data-k=min_pct min=0 max=100 value=${v.min_pct}></td><td><input type=number data-k=max_pct min=0 max=100 value=${v.max_pct}></td>
 <td><input type=number data-k=factor_pct min=10 max=250 value=${v.factor_pct}></td><td><input type=checkbox data-k=flow_priority${v.flow_priority?' checked':''}></td></tr>`).join('');
@@ -256,13 +259,13 @@ if(lastState&&enabledDone){const now=lastState.valves.map(v=>v.mode!==0),want=ro
 if(want.some((w,i)=>w!==now[i])){const f=new FormData();want.forEach((w,i)=>{if(w)f.append('ch',i)});const j=await post('config/channels',f);if(!j.ok)return;enWant=want}}
 saveSection('valves',rows.map(rowVals),'Valves saved')}
 function renderSources(){$('esources').innerHTML=ED.sources.map((s,i)=>{const m=s.type==='mqtt';return `<tr data-i=${i}>
-<td><input class=n data-k=name value="${esc(s.name)}"></td><td>${m?'MQTT':'1-Wire'}</td>
+<td><input class=n data-k=name value="${esc(s.name)}"></td><td><input class=n data-k=ha_name value="${esc(s.ha_name||'')}" placeholder="${esc(s.name)}"></td><td>${m?'MQTT':'1-Wire'}</td>
 <td>${m?`<input class=w data-k=topic value="${esc(s.topic)}" placeholder="default topic">${s.id&&!s.topic?`<div class=mut style="font-size:12px;user-select:all">${esc((CFG.mqtt_base||'vdmot/…')+'/source/'+s.id+'/set')}</div>`:''}`:esc(s.rom)}</td>
 <td>${m?`<input class=s data-k=field value="${esc(s.field)}" placeholder="plain number">`:''}</td>
 <td><input type=number data-k=offset min=-10 max=10 step=0.1 value=${s.offset}></td>
 <td><input type=number data-k=max_age_s min=0 value=${s.max_age_s}></td>
 <td class=num id="sv_${esc(s.id)}"></td><td id="ss_${esc(s.id)}" class=mut>${s.id?'':'not saved'}</td><td class=mut>${esc(s.id?usedBy(s.id):'')}</td>
-<td><button onclick="collectSources();ED.sources.splice(${i},1);renderSources()">Delete</button></td></tr>`}).join('')||'<tr><td colspan=10 class=mut>No sources</td></tr>';renderUnused()}
+<td><button onclick="collectSources();ED.sources.splice(${i},1);renderSources()">Delete</button></td></tr>`}).join('')||'<tr><td colspan=11 class=mut>No sources</td></tr>';renderUnused()}
 function collectSources(){document.querySelectorAll('#esources tr[data-i]').forEach(tr=>Object.assign(ED.sources[tr.dataset.i],rowVals(tr)))}
 function addSource(type,rom){collectSources();ED.sources.push(type==='mqtt'?{name:'MQTT '+(ED.sources.length+1),type,topic:'',field:'',offset:0,max_age_s:3600}
 :{name:'Sensor '+rom.slice(-5),type,rom,offset:0,max_age_s:300});renderSources()}

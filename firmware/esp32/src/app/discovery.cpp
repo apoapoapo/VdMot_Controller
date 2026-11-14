@@ -27,7 +27,7 @@ enum class Stage : uint8_t { Removed, Controller, Sources, Zones, Valves, Done }
 constexpr uint8_t kControllerItems = 5;
 constexpr uint8_t kSourceItems = 1;
 constexpr uint8_t kZoneItems = 9 + vdm::kMaxInfoSources; /* + further temperatures */
-constexpr uint8_t kValveItems = 4;
+constexpr uint8_t kValveItems = 5;
 constexpr uint8_t kMaxPerPass = 6;
 
 Stage g_stage = Stage::Done;
@@ -63,6 +63,11 @@ void topicFor(const Msg &m)
 /* Note: ArduinoJson 6 keeps a const char* as a pointer and copies a char*.
  * Everything that is not a literal is assigned as char*, since the document
  * is serialized after the builder returned. */
+const char *haName(const char *ha_name, const char *name)
+{
+    return ha_name[0] != '\0' ? ha_name : name;
+}
+
 JsonObject base(const Msg &m, const char *name)
 {
     g_doc->clear();
@@ -229,7 +234,7 @@ bool buildSource(uint8_t idx, Msg &m)
         g_remove = true; /* the zone shows it */
         return true;
     }
-    JsonObject o = base(m, s.name);
+    JsonObject o = base(m, haName(s.ha_name, s.name));
     char t[48];
     snprintf(t, sizeof(t), "~/source/%s/state", s.id);
     o["stat_t"] = t;
@@ -378,7 +383,7 @@ bool buildZone(uint8_t idx, uint8_t sub, Msg &m)
             return true;
         }
         const vdm::SourceConfig &s = config().sources[si];
-        o = base(m, s.name);
+        o = base(m, haName(s.ha_name, s.name));
         char t[48];
         snprintf(t, sizeof(t), "~/source/%s/state", s.id);
         o["stat_t"] = t;
@@ -397,8 +402,9 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     const vdm::Config &c = config();
     if (!((g_enabled >> ch) & 1u)) {
         /* channel disabled on the STM32: no entities */
-        static const char *const kVComp[] = {"valve", "binary_sensor", "sensor", "button"};
-        static const char *const kVObj[] = {"valve", "fault", "current", "calibrate"};
+        static const char *const kVComp[] = {"valve", "binary_sensor", "sensor", "button",
+                                             "sensor"};
+        static const char *const kVObj[] = {"valve", "fault", "current", "calibrate", "position"};
         if (sub >= kValveItems) {
             return false;
         }
@@ -408,6 +414,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
         return true;
     }
     const vdm::ValveConfig &v = c.valves[ch];
+    const char *vname = haName(v.ha_name, v.name);
     char st[32], set[32];
     snprintf(st, sizeof(st), "~/valve/%u/state", ch + 1u);
     snprintf(set, sizeof(set), "~/valve/%u/set", ch + 1u);
@@ -417,7 +424,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 0:
         m.component = "valve";
         snprintf(m.object, sizeof(m.object), "v%u_valve", ch + 1u);
-        o = base(m, v.name);
+        o = base(m, vname);
         /* position (actual) and opening/closing; commands are the target in % */
         o["cmd_t"] = set;
         o["stat_t"] = st;
@@ -431,7 +438,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 1:
         m.component = "binary_sensor";
         snprintf(m.object, sizeof(m.object), "v%u_fault", ch + 1u);
-        snprintf(name, sizeof(name), "%s fault", v.name);
+        snprintf(name, sizeof(name), "%s fault", vname);
         o = base(m, name);
         o["stat_t"] = st;
         o["val_tpl"] = "{{ 'ON' if value_json.fault or value_json.mode == 'fault' else 'OFF' }}";
@@ -441,7 +448,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 2:
         m.component = "sensor";
         snprintf(m.object, sizeof(m.object), "v%u_current", ch + 1u);
-        snprintf(name, sizeof(name), "%s motor current", v.name);
+        snprintf(name, sizeof(name), "%s motor current", vname);
         o = base(m, name);
         o["stat_t"] = st;
         o["val_tpl"] = "{{ value_json.current_ma }}";
@@ -454,12 +461,23 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 3:
         m.component = "button";
         snprintf(m.object, sizeof(m.object), "v%u_calibrate", ch + 1u);
-        snprintf(name, sizeof(name), "%s calibrate", v.name);
+        snprintf(name, sizeof(name), "%s calibrate", vname);
         o = base(m, name);
         o["cmd_t"] = set;
         o["pl_prs"] = "{\"calibrate\":true}";
         o["ent_cat"] = "config";
         o["en"] = false;
+        break;
+    case 4:
+        m.component = "sensor";
+        snprintf(m.object, sizeof(m.object), "v%u_position", ch + 1u);
+        snprintf(name, sizeof(name), "%s position", vname);
+        o = base(m, name);
+        o["stat_t"] = st;
+        o["val_tpl"] = "{{ value_json.position }}";
+        o["unit_of_meas"] = "%";
+        o["stat_cla"] = "measurement";
+        o["ic"] = "mdi:valve";
         break;
     default:
         return false;

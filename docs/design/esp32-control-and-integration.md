@@ -306,6 +306,8 @@ not sent.
 
 ## 8. Home Assistant (discovery)
 
+Entity names: valves and sources have an optional `ha_name` (name in Home
+Assistant, default: `name`); Home Assistant puts the device name in front.
 Discovery messages are retained, sent step by step after connecting, after
 every configuration change and when Home Assistant announces
 `<prefix>/status = online`. Entities of zones or sources removed while the
@@ -346,7 +348,8 @@ area):
 **Per enabled valve** (on its zone's device, or on the controller without a
 zone; channels disabled on the STM32 get no entities): `valve` with the
 actual position and opening/closing (commandable outside of mode
-`control`, attributes: the whole valve state),
+`control`; the toggle opens or closes fully; attributes: the whole valve
+state), `sensor` position (actual, %),
 `binary_sensor` fault (attributes: the whole valve state), `sensor` motor
 current and `button` calibrate (both disabled by default).
 

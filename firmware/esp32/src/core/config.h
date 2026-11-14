@@ -81,6 +81,7 @@ struct HvacConfig {
 struct SourceConfig {
     char id[kIdSize] = "";
     char name[kNameSize] = "";
+    char ha_name[kNameSize] = ""; /* name in Home Assistant, empty: name */
     SourceType type = SourceType::OneWire;
     char rom[24] = "";    /* 1-Wire: "28-FF-..." */
     char topic[128] = ""; /* MQTT, empty: <base topic>/source/<id>/set */
@@ -109,7 +110,8 @@ struct ZoneConfig {
 
 struct ValveConfig {
     char name[kNameSize] = "";
-    char zone[kIdSize] = ""; /* empty: controlled directly (like a zone in manual mode) */
+    char ha_name[kNameSize] = ""; /* name in Home Assistant, empty: name */
+    char zone[kIdSize] = "";      /* empty: controlled directly (like a zone in manual mode) */
     uint8_t min_pct = 0;
     uint8_t max_pct = 100;
     uint8_t factor_pct = 100;
