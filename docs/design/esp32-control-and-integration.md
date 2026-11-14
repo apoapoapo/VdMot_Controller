@@ -306,8 +306,12 @@ not sent.
 
 ## 8. Home Assistant (discovery)
 
-Entity names: valves and sources have an optional `ha_name` (name in Home
-Assistant, default: `name`); Home Assistant puts the device name in front.
+Entity names: Home Assistant puts the device name in front. Sources have
+an optional `short_name` that replaces their name there. Valve entities are
+named "<function> <suffix>" (Valve, Position, Fault, Motor current,
+Calibrate); the suffix is the valve's `short_name`, or nothing if it is
+the only valve of its zone, otherwise its name. Example: "VdMot Office
+Position", "VdMot Bathroom Position front".
 Discovery messages are retained, sent step by step after connecting, after
 every configuration change and when Home Assistant announces
 `<prefix>/status = online`. Entities of zones or sources removed while the

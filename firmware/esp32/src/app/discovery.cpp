@@ -63,9 +63,20 @@ void topicFor(const Msg &m)
 /* Note: ArduinoJson 6 keeps a const char* as a pointer and copies a char*.
  * Everything that is not a literal is assigned as char*, since the document
  * is serialized after the builder returned. */
-const char *haName(const char *ha_name, const char *name)
+const char *haName(const char *short_name, const char *name)
 {
-    return ha_name[0] != '\0' ? ha_name : name;
+    return short_name[0] != '\0' ? short_name : name;
+}
+
+/* "Position", "Position vorne": function plus the valve's short name (see
+ * ValveConfig::short_name) */
+void valveLabel(char *out, size_t len, const char *function, const char *suffix)
+{
+    if (suffix[0] != '\0') {
+        snprintf(out, len, "%s %s", function, suffix);
+    } else {
+        snprintf(out, len, "%s", function);
+    }
 }
 
 JsonObject base(const Msg &m, const char *name)
@@ -234,7 +245,7 @@ bool buildSource(uint8_t idx, Msg &m)
         g_remove = true; /* the zone shows it */
         return true;
     }
-    JsonObject o = base(m, haName(s.ha_name, s.name));
+    JsonObject o = base(m, haName(s.short_name, s.name));
     char t[48];
     snprintf(t, sizeof(t), "~/source/%s/state", s.id);
     o["stat_t"] = t;
@@ -383,7 +394,7 @@ bool buildZone(uint8_t idx, uint8_t sub, Msg &m)
             return true;
         }
         const vdm::SourceConfig &s = config().sources[si];
-        o = base(m, haName(s.ha_name, s.name));
+        o = base(m, haName(s.short_name, s.name));
         char t[48];
         snprintf(t, sizeof(t), "~/source/%s/state", s.id);
         o["stat_t"] = t;
@@ -414,7 +425,14 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
         return true;
     }
     const vdm::ValveConfig &v = c.valves[ch];
-    const char *vname = haName(v.ha_name, v.name);
+    int vz = c.zoneIndex(v.zone);
+    uint8_t in_zone = 0;
+    for (const vdm::ValveConfig &x : c.valves) {
+        in_zone = static_cast<uint8_t>(in_zone + (vz >= 0 && strcmp(x.zone, v.zone) == 0));
+    }
+    const char *suffix = v.short_name[0] != '\0'   ? v.short_name
+                         : (vz < 0 || in_zone > 1) ? v.name
+                                                   : "";
     char st[32], set[32];
     snprintf(st, sizeof(st), "~/valve/%u/state", ch + 1u);
     snprintf(set, sizeof(set), "~/valve/%u/set", ch + 1u);
@@ -424,7 +442,8 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 0:
         m.component = "valve";
         snprintf(m.object, sizeof(m.object), "v%u_valve", ch + 1u);
-        o = base(m, vname);
+        valveLabel(name, sizeof(name), "Valve", suffix);
+        o = base(m, name);
         /* position (actual) and opening/closing; commands are the target in % */
         o["cmd_t"] = set;
         o["stat_t"] = st;
@@ -438,7 +457,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 1:
         m.component = "binary_sensor";
         snprintf(m.object, sizeof(m.object), "v%u_fault", ch + 1u);
-        snprintf(name, sizeof(name), "%s fault", vname);
+        valveLabel(name, sizeof(name), "Fault", suffix);
         o = base(m, name);
         o["stat_t"] = st;
         o["val_tpl"] = "{{ 'ON' if value_json.fault or value_json.mode == 'fault' else 'OFF' }}";
@@ -448,7 +467,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 2:
         m.component = "sensor";
         snprintf(m.object, sizeof(m.object), "v%u_current", ch + 1u);
-        snprintf(name, sizeof(name), "%s motor current", vname);
+        valveLabel(name, sizeof(name), "Motor current", suffix);
         o = base(m, name);
         o["stat_t"] = st;
         o["val_tpl"] = "{{ value_json.current_ma }}";
@@ -461,7 +480,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 3:
         m.component = "button";
         snprintf(m.object, sizeof(m.object), "v%u_calibrate", ch + 1u);
-        snprintf(name, sizeof(name), "%s calibrate", vname);
+        valveLabel(name, sizeof(name), "Calibrate", suffix);
         o = base(m, name);
         o["cmd_t"] = set;
         o["pl_prs"] = "{\"calibrate\":true}";
@@ -471,7 +490,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 4:
         m.component = "sensor";
         snprintf(m.object, sizeof(m.object), "v%u_position", ch + 1u);
-        snprintf(name, sizeof(name), "%s position", vname);
+        valveLabel(name, sizeof(name), "Position", suffix);
         o = base(m, name);
         o["stat_t"] = st;
         o["val_tpl"] = "{{ value_json.position }}";
