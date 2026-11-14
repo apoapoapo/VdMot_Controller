@@ -24,3 +24,10 @@
   `cd firmware/esp32 && pio test -e native`
 - Formatting: `clang-format` with the repository's `.clang-format`, applied to
   `common/` and `firmware/` only; CI checks it.
+
+## Releases
+- The version is set in `[fw]` of both `firmware/esp32/platformio.ini` and
+  `firmware/stm32/platformio.ini` (always the same).
+- A release is published on GitHub by the maintainer with the tag
+  `v<major>.<minor>.<patch>`; `.github/workflows/release.yml` checks the tag
+  against both files, builds all images and attaches them to the release.

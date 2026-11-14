@@ -1,6 +1,6 @@
 # VdMot Controller – Firmware rebuild (v2)
 
-Date: 2026-11-13 · Status: planning
+Date: 2026-11-13 · Status: phases 0–3 done, release 2.0.0
 
 This document records **why** the firmware is being rebuilt, **which decisions**
 have been made and **in which order** the work is done. The UART protocol is
@@ -172,7 +172,7 @@ Done (2a, bring-up for the first hardware test):
   legacy NVS without modifying it), web page + REST API (status, targets,
   calibration, settings, STM32 flashing, ESP32 OTA, start previous ESP32
   firmware), basic auth with the legacy web login, task watchdog.
-- Hardware test guide: [`../testing/hardware-bringup.md`](../testing/hardware-bringup.md).
+- Installation guide: [`../installation.md`](../installation.md).
 
 Done (2b), see the design [`../design/esp32-control-and-integration.md`](../design/esp32-control-and-integration.md):
 - `src/core` (host tested): `Config` (JSON, validation, sections with id
