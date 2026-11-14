@@ -73,11 +73,12 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <th>Supply temperature</th><th>Xp K</th><th>Ti s</th><th>Sample s</th><th>Fallback %</th><th></th></tr></thead><tbody id="ezones"></tbody></table>
 <div class="row"><button onclick="addZone()">Add zone</button><button class="p" onclick="saveZones()">Save zones</button></div></section>
 <section><h2>Valves</h2>
-<ul class="help"><li>Without a zone a valve is set directly (overview).</li>
+<ul class="help"><li>Enabled: channels without a valve can be switched off; the STM32 then neither detects nor moves them.</li>
+<li>Without a zone a valve is set directly (overview).</li>
 <li>Min/max limit every target; min is the minimum opening, also with heating off.</li>
 <li>Factor scales the zone output (simple hydraulic balancing between the circuits of a zone).</li>
 <li>Flow priority: valves opened first to reach the minimum total opening (Settings).</li></ul>
-<table><thead><tr><th>#</th><th>Name</th><th>Zone</th><th>Min %</th><th>Max %</th><th>Factor %</th><th>Flow priority</th></tr></thead><tbody id="evalves"></tbody></table>
+<table><thead><tr><th>#</th><th>Enabled</th><th>Name</th><th>Zone</th><th>Min %</th><th>Max %</th><th>Factor %</th><th>Flow priority</th></tr></thead><tbody id="evalves"></tbody></table>
 <div class="row"><button class="p" onclick="saveValves()">Save valves</button></div></section>
 <section><h2>Temperature sources</h2>
 <ul class="help"><li>1-Wire sensors found on the bus are offered below the table.</li>
@@ -112,8 +113,7 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <span class="mut">Orange: differs from the default. Settings are stored on the STM32 and survive updates. The failsafe position follows the fallback position.</span></div></form>
 <form id="mot" onsubmit="save('motor',this);return false"><div class="grid" id="motf"></div>
 <div class="row"><button class="p">Save motor parameters</button><button type="button" onclick="defaults('motf','motor')">Load defaults</button></div></form>
-<form onsubmit="save('channels',this);return false"><div class="row">Enabled channels <span id="chans"></span>
-<button class="p">Save</button></div></form></section>
+</section>
 <section><h2>Configuration backup</h2>
 <div class="row"><a href="/api/config/export"><button>Export configuration</button></a>
 <input type="file" id="fimp" accept=".json"><button onclick="importCfg()">Import and restart</button></div>
@@ -186,8 +186,8 @@ function pauseLink(sec){const f=new FormData();f.append('seconds',sec===undefine
 function setT(ch){const v=$('t'+ch).value;const f=new FormData();f.append('ch',ch);f.append('pos',v);editing.delete('t'+ch);post('target',f)}
 function zoneCmd(id,k,v){const f=new FormData();f.append('id',id);f.append(k,v);editing.delete('sp'+id);editing.delete('cp'+id);post('zone',f)}
 /* forms with unsaved edits are not overwritten by the periodic refresh */
-const dirty=new Set();const FORMID={system:'sysf',motor:'motf',channels:'chans'};
-['input','change'].forEach(ev=>document.addEventListener(ev,e=>{const f=e.target.closest&&e.target.closest('#sysf,#motf,#chans');if(f)dirty.add(f.id)}));
+const dirty=new Set();const FORMID={system:'sysf',motor:'motf'};
+['input','change'].forEach(ev=>document.addEventListener(ev,e=>{const f=e.target.closest&&e.target.closest('#sysf,#motf');if(f)dirty.add(f.id)}));
 async function save(kind,form){const j=await post('config/'+kind,new FormData(form));if(j.ok)dirty.delete(FORMID[kind]);return false}
 function flags(f){const n=[];if(f&1)n.push('cal');if(f&2)n.push('cal pending');if(f&4)n.push('pos?');if(f&8)n.push('end');if(f&16)n.push('failsafe');return n.join(', ')}
 function upload(kind){const fi=$(kind==='esp'?'fesp':'fstm').files[0];if(!fi){alert('choose a file');return}
@@ -240,12 +240,21 @@ else if(e.type==='number')o[k]=e.value===''?null:Number(e.value);else o[k]=e.val
 function collectZones(){document.querySelectorAll('#ezones tr[data-i]').forEach(tr=>{const z=ED.zones[tr.dataset.i];Object.assign(z,rowVals(tr));if(z.fallback_pct===null)z.fallback_pct=-1})}
 function addZone(){collectZones();ED.zones.push({name:'Zone '+(ED.zones.length+1),mode:'control',setpoint:20,cool_setpoint:24,enabled:true,supply_source:'',control_sources:[],info_sources:[],profile:'radiator',xp:1.5,ti_s:900,sample_s:60,fallback_pct:-1});renderZones()}
 function saveZones(){collectZones();saveSection('zones',ED.zones,'Zones saved')}
-function renderValves(){$('evalves').innerHTML=CFG.valves.map((v,i)=>`<tr data-i=${i}><td>${i+1}</td>
+function renderValves(){$('evalves').innerHTML=CFG.valves.map((v,i)=>`<tr data-i=${i}><td>${i+1}</td><td><input type=checkbox class=en id=en${i}></td>
 <td><input class=n data-k=name value="${esc(v.name)}"></td>
 <td><select data-k=zone>${opt('','– none –',!v.zone)}${CFG.zones.map(z=>opt(z.id,z.name,z.id===v.zone)).join('')}</select></td>
 <td><input type=number data-k=min_pct min=0 max=100 value=${v.min_pct}></td><td><input type=number data-k=max_pct min=0 max=100 value=${v.max_pct}></td>
-<td><input type=number data-k=factor_pct min=10 max=250 value=${v.factor_pct}></td><td><input type=checkbox data-k=flow_priority${v.flow_priority?' checked':''}></td></tr>`).join('')}
-function saveValves(){const a=[...document.querySelectorAll('#evalves tr[data-i]')].map(rowVals);saveSection('valves',a,'Valves saved')}
+<td><input type=number data-k=factor_pct min=10 max=250 value=${v.factor_pct}></td><td><input type=checkbox data-k=flow_priority${v.flow_priority?' checked':''}></td></tr>`).join('');
+enabledDone=false;renderEnabled(lastState)}
+/* the enabled boxes are filled once per rendering; after a change the
+ * wanted state is shown until the STM32 reports it */
+let enabledDone=false,enWant=null;
+function renderEnabled(s){if(enWant&&s.valves.every((v,i)=>(v.mode!==0)===enWant[i]))enWant=null;
+if(enabledDone||!$('en0')||!s)return;enabledDone=true;s.valves.forEach((v,i)=>{const e=$('en'+i);if(e)e.checked=enWant?enWant[i]:v.mode!==0})}
+async function saveValves(){const rows=[...document.querySelectorAll('#evalves tr[data-i]')];
+if(lastState&&enabledDone){const now=lastState.valves.map(v=>v.mode!==0),want=rows.map((r,i)=>$('en'+i).checked);
+if(want.some((w,i)=>w!==now[i])){const f=new FormData();want.forEach((w,i)=>{if(w)f.append('ch',i)});const j=await post('config/channels',f);if(!j.ok)return;enWant=want}}
+saveSection('valves',rows.map(rowVals),'Valves saved')}
 function renderSources(){$('esources').innerHTML=ED.sources.map((s,i)=>{const m=s.type==='mqtt';return `<tr data-i=${i}>
 <td><input class=n data-k=name value="${esc(s.name)}"></td><td>${m?'MQTT':'1-Wire'}</td>
 <td>${m?`<input class=w data-k=topic value="${esc(s.topic)}" placeholder="${esc((CFG.mqtt_base||'vdmot/…')+'/source/'+(s.id||'<id>')+'/set')}">`:esc(s.rom)}</td>
@@ -325,8 +334,7 @@ s.ctl.sources.forEach(x=>{const v=$('sv_'+x.id),st=$('ss_'+x.id);if(v)v.textCont
 if(st){st.textContent=x.state+(x.age!==undefined?` (${x.age} s)`:'');st.className=x.state==='ok'?'ok':'warn'}});
 lastState=s;renderUnused();const D=s.defaults||{};fill('sysf',SYSF,s.sys,D.sys);fill('motf',MOTF,s.motor,D.motor);
 const fs=$('sysf').querySelector('[name=failsafe_pos]');if(fs)fs.readOnly=true;
-if(!formsDone){$('chans').innerHTML=s.valves.map(v=>`<label style="display:inline-flex;gap:2px"><input type=checkbox name=ch value=${v.ch}>${v.ch+1}</label>`).join(' ');}
-if(!dirty.has('chans'))s.valves.forEach(v=>{$('chans').querySelector(`[value="${v.ch}"]`).checked=v.mode!==0});
+renderEnabled(s);
 formsDone=true;
 const p=s.esp.previous;$('prev').textContent=p?`Previous ESP32 firmware in the other slot: ${p.project} ${p.version} (${p.date})`:'No previous ESP32 firmware';$('rb').disabled=!p;
 const u=s.update;if(!espUpload&&(u.active||u.result)){$('prog').value=u.percent;$('upd').textContent=u.active?`STM32 update: ${u.phase} ${u.percent}%`:`Last STM32 update: ${u.result||u.phase}`;

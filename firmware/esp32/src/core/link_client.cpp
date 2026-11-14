@@ -355,7 +355,12 @@ void LinkClient::onConnected(uint32_t now_ms)
 
 void LinkClient::setError(const char *what, uint8_t status, uint8_t detail)
 {
-    snprintf(last_error_, sizeof(last_error_), "%s: status %u, detail %u", what, status, detail);
+    static const char *const kNames[] = {"ok",           "unknown message", "bad length",
+                                         "out of range", "invalid channel", "busy",
+                                         "wrong state",  "storage error",   "not ready"};
+    const char *name = status < sizeof(kNames) / sizeof(kNames[0]) ? kNames[status] : "error";
+    snprintf(last_error_, sizeof(last_error_), "%s: %s (status %u, detail %u)", what, name, status,
+             detail);
 }
 
 namespace
@@ -536,7 +541,17 @@ void LinkClient::onResponse(const vdm_frame_t &f, uint32_t now_ms)
     case VDM_MSG_SENSOR_SCAN:
     case VDM_MSG_RESET:
         if (status != VDM_OK) {
-            setError("command", status, detail);
+            const char *what = f.msg == VDM_MSG_CALIBRATE      ? "calibrate"
+                               : f.msg == VDM_MSG_DETECT       ? "detect"
+                               : f.msg == VDM_MSG_STOP         ? "stop"
+                               : f.msg == VDM_MSG_SET_CHANNELS ? "channels"
+                                                               : "command";
+            if (status == VDM_ERR_CHANNEL) {
+                snprintf(last_error_, sizeof(last_error_), "%s: channel %u is not enabled", what,
+                         detail + 1u);
+            } else {
+                setError(what, status, detail);
+            }
         } else if (f.msg != VDM_MSG_RESET) {
             next_states_ms_ = now_ms; /* show the effect soon */
         }

@@ -130,13 +130,22 @@ String romString(const uint8_t *rom)
     return b;
 }
 
-/* "all" -> every channel, otherwise a channel number 0..11 */
+/* "all" -> every enabled channel, otherwise a channel number 0..11 */
 bool channelMask(uint16_t &mask)
 {
     String ch = server.arg("ch");
     if (ch == "all") {
+        char err[8];
         mask = VDM_CHANNEL_MASK_ALL;
-        return true;
+        if (readModel(g_model, err, sizeof(err)) && g_model.valves_valid) {
+            mask = 0;
+            for (uint8_t c = 0; c < VDM_MAX_CHANNELS; c++) {
+                if (g_model.valves[c].mode != VDM_MODE_DISABLED) {
+                    mask |= static_cast<uint16_t>(1u << c);
+                }
+            }
+        }
+        return mask != 0;
     }
     long c = ch.toInt();
     if (ch.length() == 0 || c < 0 || c >= VDM_MAX_CHANNELS) {
@@ -622,7 +631,7 @@ void handleMaskCommand(CommandType t)
     }
     uint16_t mask;
     if (!channelMask(mask)) {
-        reply(false, "ch must be 0..11 or all");
+        reply(false, "ch must be 0..11 or all (at least one channel enabled)");
         return;
     }
     reply(command(t, mask), "queue full");
