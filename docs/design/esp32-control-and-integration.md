@@ -63,6 +63,7 @@ temperature sources ──► zone (room) ──► valves (1..n channels) ─�
 | `mqtt` | enabled, broker host and port, user and password, client id (default from the MAC), base topic, HA discovery on/off, discovery prefix (`homeassistant`) |
 | `syslog` | enabled, host, port, level (diagnostics) – later |
 | `flow` | fallback position, minimum total opening, see 5 |
+| `hvac` | mode auto/heat/cool, global supply temperature source, margin, see 4.5 |
 | `sources[]` | temperature sources, see 3 |
 | `zones[]` | zones, see 4 |
 | `valves[12]` | name, zone, minimum and maximum position, factor, flow priority, see 4.3 |
@@ -118,8 +119,10 @@ for that source.
 |---|---|
 | `id`, `name` | stable key (`z1`, …) and display name, e.g. "Bathroom" |
 | `mode` | `control`: the ESP32 controller sets the valves. `manual`: the valve positions come from outside (web, HA, KNX). |
-| `setpoint` | target temperature in °C (5…30), stored, can be changed via web, HA or KNX |
-| `heating` | on/off (HA climate `heat`/`off`). Off: the valves go to their minimum position. |
+| `setpoint` | heating target temperature in °C (5…30), stored, can be changed via web, HA or KNX |
+| `cool_setpoint` | cooling target temperature in °C (15…35, default 24), see 4.5 |
+| `enabled` | on/off (HA climate `off`). Off: the valves go to their minimum position. |
+| `supply_source` | supply temperature of the zone (e.g. its distributor); empty: `hvac.supply_source`, see 4.5 |
 | `control_sources` | up to 4 temperature sources used for control; the zone temperature is the mean of the valid ones (e.g. one room with two sensors) |
 | `info_sources[]` | further sources shown with the zone, e.g. the return temperature of each circuit |
 | `profile` | controller parameters: `floor` (floor heating), `radiator` or `custom` (see 4.4) |
@@ -179,6 +182,39 @@ Profiles (starting values, to be tuned):
 | `custom` | free | free | free |
 
 ---
+
+### 4.5 Heating, cooling and pauses
+
+The heat pump of the owner's house cycles most of the year, and in summer
+the same pipes cool passively (ground loop). What the water delivers is
+judged **per zone** from its supply temperature `S` and its room
+temperature `T`, with `hvac.supply_margin_k` = `m` (default 2 K):
+
+| Condition | Medium | Controller |
+|---|---|---|
+| `S ≥ T + m` | heat | PI towards `setpoint` |
+| `S ≤ T − m` | cold | PI towards `cool_setpoint` (opens when the room is too warm) |
+| in between | none | **paused** |
+
+- Once heating (cooling), `m/2` is enough to stay in that state
+  (hysteresis); a change must last 5 minutes (dwell time), so the pipe
+  cooling down after a short stop does not pause the zone at once.
+- **Paused:** the integral is frozen and the valves keep their position,
+  so the controller does not wind up while the heat pump is off and the
+  motors do not move.
+- Switching between heating and cooling restarts the controller bumpless.
+- Zones are independent: in summer an attic above its cooling setpoint
+  cools while a cool ground floor pauses.
+- `hvac.mode`: `auto` (default) as above; `heat` / `cool` allow only that
+  medium (the other one pauses), e.g. switched by Home Assistant from the
+  heat pump's operating mode.
+- Without a supply sensor (or while it is stale): `auto` and `heat` heat,
+  `cool` cools, nothing is paused — the behaviour without this feature.
+- Dew point protection is left to the heat pump (it limits the supply
+  temperature in cooling mode).
+
+In Home Assistant the zone's `climate` gets the modes heat/cool/off and
+the action heating/cooling/idle (phase 3).
 
 ## 5. Flow guard (minimum flow)
 

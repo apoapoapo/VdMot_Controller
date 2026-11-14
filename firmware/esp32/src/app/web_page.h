@@ -47,7 +47,7 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <nav id="nav"><a href="#ov">Overview</a><a href="#rooms">Rooms &amp; valves</a><a href="#set">Settings</a><a href="#sys">System</a></nav>
 <main>
 <div class="tab" id="tab-ov">
-<section><h2>Zones</h2><table><thead><tr><th>Zone</th><th class="num">Temperature °C</th><th>Setpoint °C</th><th>Heating</th><th>Mode</th>
+<section><h2>Zones</h2><table><thead><tr><th>Zone</th><th class="num">Temperature °C</th><th class="num">Supply °C</th><th>Heat setpoint °C</th><th>Cool setpoint °C</th><th>On</th><th>Mode</th>
 <th class="num">Output %</th><th>State</th></tr></thead><tbody id="zones"></tbody></table>
 <div class="row mut" id="nozones">No zones yet – create them under “Rooms &amp; valves”.</div>
 <div class="row" id="flow"></div></section>
@@ -66,9 +66,11 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <li>Mode <i>control</i>: the ESP32 controls the valves from the temperature. <i>manual</i>: the valve positions are set from outside (web, Home Assistant).</li>
 <li>Control temperature: one or more sources; with several, the mean of the valid ones is used. Further temperatures are only shown with the zone (e.g. return temperatures).</li>
 <li>Profiles: floor (Xp 2 K, Ti 3600 s, sample 300 s), radiator (Xp 1.5 K, Ti 900 s, sample 60 s), custom.</li>
+<li>Heat / cool setpoint: target temperature while the water delivers heat or cold (see Settings → Heating / cooling). On: off closes the valves to their minimum opening.</li>
+<li>Supply temperature: the supply sensor of this zone (e.g. its distributor); empty = the global one.</li>
 <li>Fallback: valve position while no control temperature is valid (empty = global setting).</li></ul>
-<table><thead><tr><th>Name</th><th>Mode</th><th>Setpoint</th><th>Heating</th><th>Control temperature</th><th>Further temperatures</th><th>Profile</th>
-<th>Xp K</th><th>Ti s</th><th>Sample s</th><th>Fallback %</th><th></th></tr></thead><tbody id="ezones"></tbody></table>
+<table><thead><tr><th>Name</th><th>Mode</th><th>Heat °C</th><th>Cool °C</th><th>On</th><th>Control temperature</th><th>Further temperatures</th><th>Profile</th>
+<th>Supply temperature</th><th>Xp K</th><th>Ti s</th><th>Sample s</th><th>Fallback %</th><th></th></tr></thead><tbody id="ezones"></tbody></table>
 <div class="row"><button onclick="addZone()">Add zone</button><button class="p" onclick="saveZones()">Save zones</button></div></section>
 <section><h2>Valves</h2>
 <ul class="help"><li>Without a zone a valve is set directly (overview).</li>
@@ -90,6 +92,10 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 </div>
 
 <div class="tab" id="tab-set">
+<section><h2>Heating / cooling</h2><div class="grid" id="f-hvac"></div>
+<ul class="help"><li>Each zone compares its supply temperature with its room temperature: at least <i>margin</i> above = heat is supplied (heat setpoint), at least <i>margin</i> below = cold is supplied (cool setpoint), in between = nothing is supplied and the controller pauses (valves keep their position, no wind-up). A change must last 5 minutes; once heating or cooling, half the margin is enough to continue.</li>
+<li>Mode auto: from the supply temperature. heat / cool: only this one; the other medium pauses. Without a supply sensor: auto and heat heat, cool cools, never paused.</li></ul>
+<div class="row"><button class="p" onclick="saveForm('hvac')">Save</button></div></section>
 <section><h2>Flow guard and fallback</h2><div class="grid" id="f-flow"></div>
 <ul class="help"><li>Fallback position: used while a zone has no valid temperature; also written to the STM32 as its failsafe position (ESP32 gone).</li>
 <li>Minimum total opening: minimum sum of all valve positions in percentage points (150 = one and a half open valves, 0 = off). Flow priority valves are opened first; valves with a fault do not count.</li></ul>
@@ -126,7 +132,9 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <section><h2>1-Wire bus</h2><div class="row"><button onclick="act('scan')">Search bus</button><span id="scan" class="mut"></span></div>
 <table><thead><tr><th>ROM id</th><th>Type</th><th class="num">Value</th><th>Status</th><th class="num">Age s</th><th>Source</th></tr></thead>
 <tbody id="sensors"></tbody></table></section>
-<section><h2>Diagnostics</h2><div class="grid" id="diag"></div>
+<section><h2>Diagnostics</h2>
+<div class="row">ESP32 memory used <progress id="heapbar" max="100" value="0"></progress><span id="heaptxt" class="mut"></span></div>
+<div class="grid" id="diag"></div>
 <div class="row">Failsafe test: pause the link for <input type=number id=pause min=0 max=3600 value=360> s
 <button onclick="pauseLink()">Pause link</button><button onclick="pauseLink(0)">Resume</button>
 <span class="mut">The STM32 enters the failsafe after its link timeout (default 300 s; can be lowered in the STM32 settings).</span></div></section>
@@ -139,7 +147,7 @@ const FAULTS=['','open circuit','blocked','timeout','overcurrent','calibration f
 const KINDS=['','DS18B20 °C','DS2438 VAD V','DS2438 VDD V','DS2438 °C'];
 const SSTAT=['ok','CRC error','unreachable','not measured','out of range'];
 const RESETS=['unknown','power-on','reset pin','software','watchdog','brown-out','low-power'];
-const ACTIONS={off:'heating off',idle:'idle',heating:'heating',manual:'manual',fallback:'fallback (no temperature)',hold:'waiting for values'};
+const ACTIONS={off:'off',idle:'idle',heating:'heating',cooling:'cooling',paused:'paused (no heat/cold supplied)',manual:'manual',fallback:'fallback (no temperature)',hold:'waiting for values'};
 function dur(s){if(s===undefined)return '?';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'d ':'')+(d||h?h+'h ':'')+m+'min'}
 const SYSF=[['link_timeout_s','Link timeout s (0 = off)'],['failsafe_pos','Failsafe position ‰ (= fallback)'],
 ['startup_pos','Startup position ‰ (65535 = last)'],['sensor_interval_s','Sensor interval s'],
@@ -147,7 +155,8 @@ const SYSF=[['link_timeout_s','Link timeout s (0 = off)'],['failsafe_pos','Fails
 const MOTF=[['endstop_factor_open','Endstop factor open (x/10)'],['endstop_factor_close','Endstop factor close (x/10)'],
 ['endstop_abs_ma','Endstop absolute mA'],['inrush_blank_ms','Inrush blanking ms'],['opencircuit_ma10','Open circuit 0.1 mA'],
 ['opencircuit_ms','Open circuit ms'],['move_timeout_s','Move timeout s'],['min_stroke_counts','Min. stroke pulses'],['max_calib_retries','Calibration retries']];
-const FORMS={flow:[['fallback_pct','Fallback position %','num'],['min_total_pct','Minimum total opening % points (0 = off)','num']],
+const FORMS={hvac:[['mode','Mode','sel:auto|heat|cool'],['supply_source','Supply temperature (global)','src'],['supply_margin_k','Margin K','num']],
+flow:[['fallback_pct','Fallback position %','num'],['min_total_pct','Minimum total opening % points (0 = off)','num']],
 device:[['name','Name','text'],['web_user','Web user (empty = no login)','text'],['web_pwd','Web password','pwd'],['tz','Time zone (POSIX)','text'],['ntp','NTP server','text']],
 network:[['mode','Interface','sel:auto|ethernet|wifi'],['dhcp','DHCP','bool'],['ip','IP address','text'],['mask','Subnet mask','text'],['gateway','Gateway','text'],['dns','DNS server','text'],['ssid','WiFi SSID','text'],['wifi_pwd','WiFi password','pwd']],
 mqtt:[['enabled','Enabled','bool'],['host','Broker host','text'],['port','Port','num'],['user','User','text'],['password','Password','pwd'],['client_id','Client id (empty = from MAC)','text'],['base_topic','Base topic (empty = vdmot/<client id>)','text'],['discovery','Home Assistant discovery','bool'],['discovery_prefix','Discovery prefix','text']]};
@@ -175,7 +184,7 @@ Object.entries(d).forEach(([k,v])=>{const i=$(id).querySelector(`[name=${k}]`);i
 let espUpload=false;
 function pauseLink(sec){const f=new FormData();f.append('seconds',sec===undefined?$('pause').value:sec);post('link/pause',f)}
 function setT(ch){const v=$('t'+ch).value;const f=new FormData();f.append('ch',ch);f.append('pos',v);editing.delete('t'+ch);post('target',f)}
-function zoneCmd(id,k,v){const f=new FormData();f.append('id',id);f.append(k,v);editing.delete('sp'+id);post('zone',f)}
+function zoneCmd(id,k,v){const f=new FormData();f.append('id',id);f.append(k,v);editing.delete('sp'+id);editing.delete('cp'+id);post('zone',f)}
 /* forms with unsaved edits are not overwritten by the periodic refresh */
 const dirty=new Set();const FORMID={system:'sysf',motor:'motf',channels:'chans'};
 ['input','change'].forEach(ev=>document.addEventListener(ev,e=>{const f=e.target.closest&&e.target.closest('#sysf,#motf,#chans');if(f)dirty.add(f.id)}));
@@ -216,18 +225,20 @@ function renderZones(){$('ezones').innerHTML=ED.zones.map((z,i)=>{const c=z.prof
 <td><input class=n data-k=name value="${esc(z.name)}"></td>
 <td><select data-k=mode>${opt('control','control',z.mode==='control')}${opt('manual','manual',z.mode==='manual')}</select></td>
 <td><input type=number data-k=setpoint min=5 max=30 step=0.5 value=${z.setpoint}></td>
-<td><input type=checkbox data-k=heating${z.heating?' checked':''}></td>
+<td><input type=number data-k=cool_setpoint min=15 max=35 step=0.5 value=${z.cool_setpoint}></td>
+<td><input type=checkbox data-k=enabled${z.enabled?' checked':''}></td>
 <td>${tags('control_sources',z.control_sources,4)}</td><td>${tags('info_sources',z.info_sources,4)}</td>
 <td><select data-k=profile onchange="collectZones();renderZones()">${['floor','radiator','custom'].map(p=>opt(p,p,z.profile===p)).join('')}</select></td>
+<td><select data-k=supply_source>${opt('','– global –',!z.supply_source)}${ED.sources.filter(s=>s.id).map(s=>opt(s.id,srcLabel(s),s.id===z.supply_source)).join('')}</select></td>
 <td><input type=number data-k=xp min=0.2 max=20 step=0.1 value=${q.xp}${c}></td><td><input type=number data-k=ti_s min=0 value=${q.ti_s}${c}></td>
 <td><input type=number data-k=sample_s min=10 value=${q.sample_s}${c}></td>
 <td><input type=number data-k=fallback_pct min=0 max=100 value="${z.fallback_pct<0?'':z.fallback_pct}" placeholder=global></td>
-<td><button onclick="collectZones();ED.zones.splice(${i},1);renderZones()">Delete</button></td></tr>`}).join('')||'<tr><td colspan=12 class=mut>No zones</td></tr>'}
+<td><button onclick="collectZones();ED.zones.splice(${i},1);renderZones()">Delete</button></td></tr>`}).join('')||'<tr><td colspan=14 class=mut>No zones</td></tr>'}
 function rowVals(tr){const o={};tr.querySelectorAll('[data-k]').forEach(e=>{const k=e.dataset.k;
 if(e.classList.contains('tags'))o[k]=JSON.parse(e.dataset.v);else if(e.type==='checkbox')o[k]=e.checked;
 else if(e.type==='number')o[k]=e.value===''?null:Number(e.value);else o[k]=e.value});return o}
 function collectZones(){document.querySelectorAll('#ezones tr[data-i]').forEach(tr=>{const z=ED.zones[tr.dataset.i];Object.assign(z,rowVals(tr));if(z.fallback_pct===null)z.fallback_pct=-1})}
-function addZone(){collectZones();ED.zones.push({name:'Zone '+(ED.zones.length+1),mode:'control',setpoint:20,heating:true,control_sources:[],info_sources:[],profile:'radiator',xp:1.5,ti_s:900,sample_s:60,fallback_pct:-1});renderZones()}
+function addZone(){collectZones();ED.zones.push({name:'Zone '+(ED.zones.length+1),mode:'control',setpoint:20,cool_setpoint:24,enabled:true,supply_source:'',control_sources:[],info_sources:[],profile:'radiator',xp:1.5,ti_s:900,sample_s:60,fallback_pct:-1});renderZones()}
 function saveZones(){collectZones();saveSection('zones',ED.zones,'Zones saved')}
 function renderValves(){$('evalves').innerHTML=CFG.valves.map((v,i)=>`<tr data-i=${i}><td>${i+1}</td>
 <td><input class=n data-k=name value="${esc(v.name)}"></td>
@@ -255,7 +266,8 @@ function renderForm(sec){const v=CFG[sec];$('f-'+sec).innerHTML=FORMS[sec].map((
 if(t==='bool')i=`<input type=checkbox data-k=${k}${v[k]?' checked':''}>`;
 else if(t==='pwd')i=`<input type=password class=s data-k=${k} placeholder="${v[k+'_set']?'unchanged':'not set'}" autocomplete=new-password>`;
 else if(t.startsWith('sel:'))i=`<select data-k=${k}>${t.slice(4).split('|').map(o=>opt(o,o,v[k]===o)).join('')}</select>`;
-else if(t==='num')i=`<input type=number data-k=${k} value="${esc(v[k])}">`;else i=`<input class=s data-k=${k} value="${esc(v[k])}">`;
+else if(t==='src')i=`<select data-k=${k}>${opt('','– none –',!v[k])}${CFG.sources.map(s=>opt(s.id,srcLabel(s),s.id===v[k])).join('')}</select>`;
+else if(t==='num')i=`<input type=number step=any data-k=${k} value="${esc(v[k])}">`;else i=`<input class=s data-k=${k} value="${esc(v[k])}">`;
 return `<label><span>${esc(l)}</span>${i}</label>`}).join('')}
 function saveForm(sec){const o=rowVals($('f-'+sec));FORMS[sec].forEach(([k,,t])=>{if(t==='pwd'&&!o[k])delete o[k]});
 saveSection(sec,o,'Settings saved')}
@@ -265,17 +277,21 @@ const j=await req('config/import',{headers:{'Content-Type':'application/json'},b
 /* ---------------- periodic refresh ---------------- */
 function renderZoneStatus(s){const zs=s.ctl.zones;$('nozones').style.display=zs.length?'none':'';
 const key=zs.map(z=>z.id).join();if($('zones').dataset.key!==key){$('zones').dataset.key=key;
-$('zones').innerHTML=zs.map(z=>`<tr id="zr${z.id}"><td></td><td class=num></td>
+$('zones').innerHTML=zs.map(z=>`<tr id="zr${z.id}"><td></td><td class=num></td><td class=num></td>
 <td><input id="sp${z.id}" type=number min=5 max=30 step=0.5 oninput="editing.add('sp${z.id}')"><button onclick="zoneCmd('${z.id}','setpoint',$('sp${z.id}').value)">Set</button></td>
-<td><input type=checkbox id="ht${z.id}" onchange="zoneCmd('${z.id}','heating',this.checked?1:0)"></td>
+<td><input id="cp${z.id}" type=number min=15 max=35 step=0.5 oninput="editing.add('cp${z.id}')"><button onclick="zoneCmd('${z.id}','cool_setpoint',$('cp${z.id}').value)">Set</button></td>
+<td><input type=checkbox id="ht${z.id}" onchange="zoneCmd('${z.id}','enabled',this.checked?1:0)"></td>
 <td><select id="md${z.id}" onchange="zoneCmd('${z.id}','mode',this.value)">${opt('control','control')}${opt('manual','manual')}</select></td>
 <td class=num></td><td></td></tr>`).join('')}
 zs.forEach(z=>{const c=$('zr'+z.id).cells;c[0].textContent=z.name;
 c[1].textContent=z.temperature===undefined?'–':z.temperature.toFixed(1);c[1].className='num '+(z.source==='ok'?'':'warn');c[1].title='source: '+z.source;
-const sp=$('sp'+z.id);if(!editing.has('sp'+z.id)&&document.activeElement!==sp)sp.value=z.setpoint;
-$('ht'+z.id).checked=z.heating;if(document.activeElement!==$('md'+z.id))$('md'+z.id).value=z.mode;
-sp.disabled=z.mode!=='control';c[5].textContent=z.output===undefined?'–':z.output.toFixed(1);
-c[6].textContent=ACTIONS[z.action]||z.action;c[6].className=z.action==='fallback'?'warn':(z.action==='heating'?'ok':'mut')});
+c[2].textContent=z.supply===undefined?'–':z.supply.toFixed(1);
+const sp=$('sp'+z.id),cp=$('cp'+z.id);if(!editing.has('sp'+z.id)&&document.activeElement!==sp)sp.value=z.setpoint;
+if(!editing.has('cp'+z.id)&&document.activeElement!==cp)cp.value=z.cool_setpoint;
+$('ht'+z.id).checked=z.enabled;if(document.activeElement!==$('md'+z.id))$('md'+z.id).value=z.mode;
+sp.disabled=cp.disabled=z.mode!=='control';sp.style.fontWeight=z.medium==='heat'?'700':'';cp.style.fontWeight=z.medium==='cool'?'700':'';
+c[7].textContent=z.output===undefined?'–':z.output.toFixed(1);
+c[8].textContent=ACTIONS[z.action]||z.action;c[8].className=z.action==='fallback'?'warn':(z.action==='heating'||z.action==='cooling'?'ok':'mut')});
 const f=s.ctl.flow;$('flow').innerHTML=f.min_total?`Flow guard: total ${pct(f.total)} % of at least ${pct(f.min_total)} %`+
 (f.active?` – <b class=warn>active, +${pct(f.added)} % added</b>`:' – not needed')+(f.insufficient?' – <b class=bad>minimum cannot be reached</b>':''):'<span class=mut>Flow guard off (minimum total opening 0)</span>'}
 async function refresh(){let s;try{const r=await fetch('/api/state');s=await r.json();if(!r.ok)throw new Error(s.error||'HTTP '+r.status)}
@@ -316,7 +332,9 @@ const p=s.esp.previous;$('prev').textContent=p?`Previous ESP32 firmware in the o
 const u=s.update;if(!espUpload&&(u.active||u.result)){$('prog').value=u.percent;$('upd').textContent=u.active?`STM32 update: ${u.phase} ${u.percent}%`:`Last STM32 update: ${u.result||u.phase}`;
 const ask=u.active&&u.phase.indexOf('RESET')>=0;$('upd').className=ask?'warn':'mut';$('upd').style.fontWeight=ask?'700':'';
 if(ask)$('upd').textContent='Press the RESET button on the STM32 (BlackPill) now – waiting up to 30 s';$('updd').textContent=u.detail?('Bootloader entry: '+u.detail):''}
-const d=Object.assign({},s.link.stats,s.diag||{});d.esp_heap=s.esp.heap;d.esp_heap_min=s.esp.heap_min;d.esp_heap_block=s.esp.heap_block;$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
+const e=s.esp;if(e.heap_size){const used=100-e.heap*100/e.heap_size,peak=100-e.heap_min*100/e.heap_size;$('heapbar').value=used;
+$('heaptxt').textContent=`${used.toFixed(0)} % (${(e.heap/1024).toFixed(0)} of ${(e.heap_size/1024).toFixed(0)} kB free) · peak ${peak.toFixed(0)} % · largest free block ${(e.heap_block/1024).toFixed(0)} kB`}
+const d=Object.assign({},s.link.stats,s.diag||{});$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
 $('log').innerHTML=s.log.slice().sort((a,b)=>b.ms-a.ms).map(e=>`<tr><td class=mut>${(e.ms/1000).toFixed(0)} s</td><td>${e.src==='esp'?'ESP32':'STM32'}</td><td>${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
 loadCfg().then(refresh);setInterval(refresh,2000);
 </script></body></html>)HTML";

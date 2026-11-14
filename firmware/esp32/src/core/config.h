@@ -34,6 +34,7 @@ enum class NetMode : uint8_t { Auto, Ethernet, Wifi };
 enum class SourceType : uint8_t { OneWire, Mqtt };
 enum class ZoneMode : uint8_t { Control, Manual };
 enum class Profile : uint8_t { Floor, Radiator, Custom };
+enum class HvacMode : uint8_t { Auto, Heat, Cool };
 
 struct DeviceConfig {
     char name[kNameSize] = "VdMot";
@@ -69,6 +70,14 @@ struct FlowConfig {
     uint16_t min_total_pct = 0; /* sum of the target positions in percentage points, 0 = off */
 };
 
+/* Heating and cooling: what the water in the pipes delivers is judged per
+ * zone from the supply temperature (docs/design, section 4.5). */
+struct HvacConfig {
+    HvacMode mode = HvacMode::Auto;   /* auto: from the supply temperature */
+    char supply_source[kIdSize] = ""; /* default supply temperature of the zones */
+    float supply_margin_k = 2.0f;     /* supply at least this far above/below the room */
+};
+
 struct SourceConfig {
     char id[kIdSize] = "";
     char name[kNameSize] = "";
@@ -84,8 +93,10 @@ struct ZoneConfig {
     char id[kIdSize] = "";
     char name[kNameSize] = "";
     ZoneMode mode = ZoneMode::Control;
-    float setpoint = 20.0f;
-    bool heating = true;
+    float setpoint = 20.0f;           /* heating */
+    float cool_setpoint = 24.0f;      /* cooling */
+    bool enabled = true;              /* off: valves at their minimum position */
+    char supply_source[kIdSize] = ""; /* empty: hvac.supply_source */
     /* the zone temperature is the mean of the valid control sources */
     char control_sources[kMaxControlSources][kIdSize] = {};
     char info_sources[kMaxInfoSources][kIdSize] = {};
@@ -111,6 +122,7 @@ struct Config {
     NetworkConfig network;
     MqttConfig mqtt;
     FlowConfig flow;
+    HvacConfig hvac;
     uint8_t source_count = 0;
     SourceConfig sources[kMaxSources];
     uint8_t zone_count = 0;

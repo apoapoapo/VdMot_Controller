@@ -329,7 +329,16 @@ void test_legacy_control_source_key()
                                    cfg),
                              err);
     TEST_ASSERT_EQUAL_STRING("s1", cfg.zones[0].control_sources[0]);
+    TEST_ASSERT_TRUE(cfg.zones[0].enabled);
     TEST_ASSERT_NOT_NULL(strstr(text(cfg, true).c_str(), "\"control_sources\":[\"s1\"]"));
+    TEST_ASSERT_TRUE(
+        parse(R"({"zones":[{"id":"z1","name":"Z","heating":false}],"next_zone_id":2})", cfg));
+    TEST_ASSERT_FALSE(cfg.zones[0].enabled);
+    TEST_ASSERT_TRUE(parse(R"({"hvac":{"mode":"cool","supply_margin_k":3}})", cfg));
+    TEST_ASSERT_EQUAL(vdm::HvacMode::Cool, cfg.hvac.mode);
+    TEST_ASSERT_FALSE(parse(R"({"hvac":{"supply_source":"s7"}})", cfg));
+    TEST_ASSERT_FALSE(
+        parse(R"({"zones":[{"id":"z1","name":"Z","supply_source":"s7"}],"next_zone_id":2})", cfg));
 }
 
 void test_reset()

@@ -371,7 +371,7 @@ void test_heating_off_goes_to_min_position()
     mqttTemp(18.0f);
     run(2000);
     TEST_ASSERT_TRUE(eng->valve(0).effective > 150);
-    cfg.zones[0].heating = false;
+    cfg.zones[0].enabled = false;
     run(1000);
     TEST_ASSERT_EQUAL(ZoneAction::Off, eng->zone(0).action);
     TEST_ASSERT_EQUAL(0, eng->valve(0).requested);
@@ -515,6 +515,135 @@ void test_flow_guard_faulty_valves_do_not_count()
     TEST_ASSERT_EQUAL(2000, eng->flow().total);
 }
 
+/* --- heating / cooling from the supply temperature ------------------------ */
+
+const char *kHvac = R"({
+  "hvac": {"supply_source": "s9", "supply_margin_k": 2},
+  "sources": [{"id": "s1", "name": "Room", "type": "mqtt", "topic": "room/t", "max_age_s": 0},
+              {"id": "s2", "name": "Attic", "type": "mqtt", "topic": "attic/t", "max_age_s": 0},
+              {"id": "s9", "name": "Supply", "type": "mqtt", "topic": "supply", "max_age_s": 0}],
+  "zones": [{"id": "z1", "name": "Room", "setpoint": 21, "cool_setpoint": 24,
+             "control_sources": ["s1"]},
+            {"id": "z2", "name": "Attic", "setpoint": 21, "cool_setpoint": 24,
+             "control_sources": ["s2"]}],
+  "valves": [{"zone": "z1"}, {"zone": "z2"}],
+  "next_source_id": 10, "next_zone_id": 3
+})";
+
+void test_pause_without_heat()
+{
+    start(kHvac);
+    stmReady(400);
+    mqtt("supply", "35");
+    mqtt("room/t", "20.5");
+    run(2000);
+    TEST_ASSERT_EQUAL(vdm::Medium::Heat, eng->zone(0).medium);
+    TEST_ASSERT_EQUAL(ZoneAction::Heating, eng->zone(0).action);
+    vdm::PiSnapshot snap[4];
+    eng->snapshot(snap, 4);
+    float out = eng->zone(0).output;
+
+    /* the heat pump stops: the pipe cools down to the room temperature */
+    mqtt("supply", "21.5");
+    run(60000);
+    TEST_ASSERT_EQUAL(ZoneAction::Heating, eng->zone(0).action); /* dwell time */
+    run(ControlEngine::kMediumDwellMs);
+    TEST_ASSERT_EQUAL(ZoneAction::Paused, eng->zone(0).action);
+    float i_paused;
+    eng->snapshot(snap, 4);
+    i_paused = snap[0].integral;
+    uint16_t pos = eng->valve(0).effective;
+    run(3600000); /* an hour without heat: nothing moves, nothing winds up */
+    eng->snapshot(snap, 4);
+    TEST_ASSERT_EQUAL_FLOAT(i_paused, snap[0].integral);
+    TEST_ASSERT_EQUAL(pos, eng->valve(0).effective);
+    (void)out;
+
+    /* heat again */
+    mqtt("supply", "30");
+    run(ControlEngine::kMediumDwellMs + 1000);
+    TEST_ASSERT_EQUAL(ZoneAction::Heating, eng->zone(0).action);
+    eng->snapshot(snap, 4);
+    TEST_ASSERT_TRUE(snap[0].integral - i_paused < 3.0f); /* no jump after the pause */
+}
+
+void test_short_dip_does_not_pause()
+{
+    start(kHvac);
+    mqtt("supply", "35");
+    mqtt("room/t", "20.5");
+    run(2000);
+    mqtt("supply", "21");
+    run(120000);
+    mqtt("supply", "34");
+    run(ControlEngine::kMediumDwellMs);
+    TEST_ASSERT_EQUAL(ZoneAction::Heating, eng->zone(0).action);
+    /* hysteresis: 22 °C is still "heat" once heating (margin 2, kept down to 1) */
+    mqtt("supply", "21.7");
+    run(ControlEngine::kMediumDwellMs + 1000);
+    TEST_ASSERT_EQUAL(vdm::Medium::Heat, eng->zone(0).medium);
+}
+
+void test_cooling_and_mixed_zones()
+{
+    start(kHvac);
+    stmReady(0);
+    /* summer: cool supply, attic warm, ground floor cool */
+    mqtt("supply", "19");
+    mqtt("room/t", "20.5");
+    mqtt("attic/t", "26");
+    run(2000);
+    TEST_ASSERT_EQUAL(vdm::Medium::Cool, eng->zone(1).medium);
+    TEST_ASSERT_EQUAL(ZoneAction::Cooling, eng->zone(1).action);
+    TEST_ASSERT_EQUAL(ZoneAction::Paused, eng->zone(0).action); /* 19 vs 20.5: nothing */
+    TEST_ASSERT_EQUAL(0, eng->valve(0).effective);
+
+    /* the attic controller opens over time (2 K above the cooling setpoint) */
+    run(1800000);
+    TEST_ASSERT_TRUE(eng->zone(1).output > 50.0f);
+
+    /* attic below its cooling setpoint: closes */
+    mqtt("attic/t", "23");
+    run(1800000);
+    TEST_ASSERT_TRUE(eng->zone(1).output < 5.0f);
+
+    /* ground floor 22 °C: cold water now counts, but 22 < 24: stays closed */
+    mqtt("room/t", "22");
+    run(ControlEngine::kMediumDwellMs + 61000);
+    TEST_ASSERT_EQUAL(vdm::Medium::Cool, eng->zone(0).medium);
+    TEST_ASSERT_TRUE(eng->zone(0).output < 1.0f);
+}
+
+void test_forced_mode()
+{
+    start(kHvac);
+    cfg.hvac.mode = vdm::HvacMode::Heat;
+    mqtt("supply", "15");
+    mqtt("room/t", "25");
+    run(2000);
+    TEST_ASSERT_EQUAL(ZoneAction::Paused, eng->zone(0).action); /* cold water, heat wanted */
+
+    cfg.hvac.mode = vdm::HvacMode::Cool;
+    cfg.hvac.supply_source[0] = '\0'; /* no supply sensor: cooling, never paused */
+    run(2000);
+    TEST_ASSERT_EQUAL(vdm::Medium::Cool, eng->zone(0).medium);
+    TEST_ASSERT_EQUAL(ZoneAction::Cooling, eng->zone(0).action);
+}
+
+void test_zone_supply_source_overrides()
+{
+    start(kHvac);
+    strcpy(cfg.zones[1].supply_source, "s1"); /* attic: "Room" as its supply (test only) */
+    eng->configure(cfg, now);
+    mqtt("supply", "35");
+    mqtt("room/t", "20");
+    mqtt("attic/t", "20");
+    run(2000);
+    TEST_ASSERT_EQUAL(ZoneAction::Heating, eng->zone(0).action);
+    TEST_ASSERT_EQUAL(ZoneAction::Paused, eng->zone(1).action);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, eng->zone(1).supply);
+}
+
 int main()
 {
     UNITY_BEGIN();
@@ -538,5 +667,10 @@ int main()
     RUN_TEST(test_flow_guard_priority_first);
     RUN_TEST(test_flow_guard_inactive_when_satisfied);
     RUN_TEST(test_flow_guard_faulty_valves_do_not_count);
+    RUN_TEST(test_pause_without_heat);
+    RUN_TEST(test_short_dip_does_not_pause);
+    RUN_TEST(test_cooling_and_mixed_zones);
+    RUN_TEST(test_forced_mode);
+    RUN_TEST(test_zone_supply_source_overrides);
     return UNITY_END();
 }

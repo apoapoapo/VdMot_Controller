@@ -36,8 +36,12 @@ struct SourceStatus {
     uint32_t age_s = 0; /* since the last new value */
 };
 
-enum class ZoneAction : uint8_t { Off, Idle, Heating, Manual, Fallback, Hold };
+enum class ZoneAction : uint8_t { Off, Idle, Heating, Cooling, Paused, Manual, Fallback, Hold };
 const char *zoneActionName(ZoneAction a);
+
+/* what the water delivers to a zone */
+enum class Medium : uint8_t { Heat, Cool, None };
+const char *mediumName(Medium m);
 
 struct ZoneStatus {
     SourceState source = SourceState::Missing;
@@ -46,6 +50,9 @@ struct ZoneStatus {
     bool has_output = false; /* false: valves keep their position (start-up) */
     float output = 0.0f;     /* % */
     ZoneAction action = ZoneAction::Hold;
+    Medium medium = Medium::Heat; /* controller in use; None: paused */
+    bool has_supply = false;
+    float supply = 0.0f; /* supply temperature used for the zone */
 };
 
 struct ValveStatus {
@@ -113,6 +120,7 @@ struct PiSnapshot {
     char zone_id[kIdSize];
     float integral;
     float output;
+    uint8_t medium; /* Medium the controller ran for */
 };
 
 class ControlEngine
@@ -121,6 +129,8 @@ class ControlEngine
     static constexpr uint32_t kStartupGraceMs = 120000;
     static constexpr float kOutputDeadband = 1.0f; /* % */
     static constexpr float kHeatingThreshold = 1.0f;
+    /* a change of the delivered medium must last this long */
+    static constexpr uint32_t kMediumDwellMs = 5UL * 60UL * 1000UL;
 
     enum class Result : uint8_t { Ok, BadChannel, Controlled, Unknown };
 
@@ -185,11 +195,18 @@ class ControlEngine
         float applied = 0.0f;
         uint32_t sample_ms = 0;
         ZoneMode last_mode = ZoneMode::Control;
+        bool medium_init = false;
+        Medium medium = Medium::Heat;    /* delivered medium (with dwell) */
+        Medium candidate = Medium::Heat; /* waiting for the dwell time */
+        uint32_t candidate_ms = 0;
+        Medium delivered = Medium::Heat; /* last Heat/Cool seen */
+        Medium pi_medium = Medium::Heat; /* medium the controller runs for */
         ZoneStatus status;
     };
 
     void evalSource(uint8_t i, uint32_t now_ms);
     void evalZone(uint8_t i, uint32_t now_ms);
+    Medium evalMedium(uint8_t i, uint32_t now_ms);
     bool zonePosition(uint8_t zi, float &pct) const;
     void evalValves();
     void flowGuard();

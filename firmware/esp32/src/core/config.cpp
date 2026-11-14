@@ -201,6 +201,7 @@ void readIds(Reader &r, JsonObjectConst o, const char *key, char (*dst)[kIdSize]
 const char *const kNetModes[] = {"auto", "ethernet", "wifi"};
 const char *const kSourceTypes[] = {"onewire", "mqtt"};
 const char *const kZoneModes[] = {"control", "manual"};
+const char *const kHvacModes[] = {"auto", "heat", "cool"};
 const char *const kProfiles[] = {"floor", "radiator", "custom"};
 
 void setErr(char *err, size_t len, const char *fmt, const char *a = "", const char *b = "")
@@ -305,7 +306,15 @@ bool dropReferences(JsonObject root, const char *name)
         }
     } else if (strcmp(name, "sources") == 0) {
         JsonArrayConst sources = root["sources"];
+        const char *hs = root["hvac"]["supply_source"];
+        if (hs != nullptr && hs[0] != '\0' && !hasId(sources, hs)) {
+            root["hvac"]["supply_source"] = "";
+        }
         for (JsonVariant zv : root["zones"].as<JsonArray>()) {
+            const char *zs = zv["supply_source"];
+            if (zs != nullptr && zs[0] != '\0' && !hasId(sources, zs)) {
+                zv["supply_source"] = "";
+            }
             for (const char *key : {"control_sources", "info_sources"}) {
                 JsonArray list = zv[key];
                 for (size_t i = list.size(); i-- > 0;) {
@@ -336,6 +345,7 @@ void Config::reset()
     network = NetworkConfig();
     mqtt = MqttConfig();
     flow = FlowConfig();
+    hvac = HvacConfig();
     source_count = 0;
     for (SourceConfig &s : sources) {
         s = SourceConfig();
@@ -439,6 +449,11 @@ void configToJson(const Config &c, JsonObject o, bool secrets)
     f["fallback_pct"] = c.flow.fallback_pct;
     f["min_total_pct"] = c.flow.min_total_pct;
 
+    JsonObject h = o.createNestedObject("hvac");
+    h["mode"] = kHvacModes[static_cast<uint8_t>(c.hvac.mode)];
+    h["supply_source"] = c.hvac.supply_source;
+    h["supply_margin_k"] = round2(c.hvac.supply_margin_k);
+
     JsonArray sa = o.createNestedArray("sources");
     for (uint8_t i = 0; i < c.source_count; i++) {
         const SourceConfig &s = c.sources[i];
@@ -464,7 +479,9 @@ void configToJson(const Config &c, JsonObject o, bool secrets)
         zo["name"] = z.name;
         zo["mode"] = kZoneModes[static_cast<uint8_t>(z.mode)];
         zo["setpoint"] = round2(z.setpoint);
-        zo["heating"] = z.heating;
+        zo["cool_setpoint"] = round2(z.cool_setpoint);
+        zo["enabled"] = z.enabled;
+        zo["supply_source"] = z.supply_source;
         JsonArray ctl = zo.createNestedArray("control_sources");
         for (const auto &id : z.control_sources) {
             if (id[0] != '\0') {
@@ -566,6 +583,15 @@ bool configFromJson(JsonObjectConst o, Config &out, char *err, size_t err_len)
             return false;
         }
     }
+    {
+        Reader r(o["hvac"], "hvac", err, err_len);
+        r.choice("mode", c.hvac.mode, kHvacModes, 3);
+        r.str("supply_source", c.hvac.supply_source, sizeof(c.hvac.supply_source));
+        r.real("supply_margin_k", c.hvac.supply_margin_k, 0.5f, 10.0f);
+        if (!r.ok()) {
+            return false;
+        }
+    }
 
     JsonArrayConst sa = o["sources"];
     if (!o["sources"].isNull() && sa.isNull()) {
@@ -609,7 +635,10 @@ bool configFromJson(JsonObjectConst o, Config &out, char *err, size_t err_len)
         r.str("name", z.name, sizeof(z.name));
         r.choice("mode", z.mode, kZoneModes, 2);
         r.real("setpoint", z.setpoint, 5.0f, 30.0f);
-        r.boolean("heating", z.heating);
+        r.real("cool_setpoint", z.cool_setpoint, 15.0f, 35.0f);
+        /* "heating" in the first drafts of phase 2b */
+        r.boolean(zo["enabled"].isNull() ? "heating" : "enabled", z.enabled);
+        r.str("supply_source", z.supply_source, sizeof(z.supply_source));
         if (zo["control_sources"].isNull()) {
             /* first drafts of phase 2b stored a single source */
             r.str("control_source", z.control_sources[0], kIdSize);
@@ -695,6 +724,10 @@ bool configValidate(const Config &c, char *err, size_t err_len)
         }
     }
 
+    if (c.hvac.supply_source[0] != '\0' && c.sourceIndex(c.hvac.supply_source) < 0) {
+        setErr(err, err_len, "hvac: unknown supply source '%s'", c.hvac.supply_source);
+        return false;
+    }
     for (uint8_t i = 0; i < c.zone_count; i++) {
         const ZoneConfig &z = c.zones[i];
         if (!validId(z.id, 'z')) {
@@ -711,6 +744,10 @@ bool configValidate(const Config &c, char *err, size_t err_len)
         }
         if (z.name[0] == '\0') {
             setErr(err, err_len, "zone '%s' needs a name", z.id);
+            return false;
+        }
+        if (z.supply_source[0] != '\0' && c.sourceIndex(z.supply_source) < 0) {
+            setErr(err, err_len, "zone '%s': unknown supply source '%s'", z.name, z.supply_source);
             return false;
         }
         for (const auto &id : z.control_sources) {
@@ -760,7 +797,7 @@ bool configApplySection(const Config &base, const char *name, JsonVariantConst s
     JsonObject root = doc.to<JsonObject>();
     configToJson(base, root, true);
 
-    static const char *const kObjects[] = {"device", "network", "mqtt", "flow"};
+    static const char *const kObjects[] = {"device", "network", "mqtt", "flow", "hvac"};
     static const char *const kArrays[] = {"sources", "zones", "valves"};
     bool known = false;
     for (const char *k : kObjects) {

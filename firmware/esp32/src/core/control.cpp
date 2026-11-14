@@ -124,6 +124,23 @@ const char *zoneActionName(ZoneAction a)
         return "fallback";
     case ZoneAction::Hold:
         return "hold";
+    case ZoneAction::Cooling:
+        return "cooling";
+    case ZoneAction::Paused:
+        return "paused";
+    }
+    return "?";
+}
+
+const char *mediumName(Medium m)
+{
+    switch (m) {
+    case Medium::Heat:
+        return "heat";
+    case Medium::Cool:
+        return "cool";
+    case Medium::None:
+        return "none";
     }
     return "?";
 }
@@ -422,7 +439,7 @@ void ControlEngine::evalZone(uint8_t i, uint32_t now_ms)
         st.action = ZoneAction::Manual;
         return;
     }
-    if (!zc.heating) {
+    if (!zc.enabled) {
         z.pi.stopController();
         z.has_output = true;
         z.applied = 0.0f;
@@ -434,7 +451,23 @@ void ControlEngine::evalZone(uint8_t i, uint32_t now_ms)
 
     switch (st.source) {
     case SourceState::Ok: {
-        float e = zc.setpoint - st.temperature;
+        Medium med = evalMedium(i, now_ms);
+        st.medium = med;
+        if (med == Medium::None) {
+            /* the water delivers nothing: the controller is frozen and the
+             * valves keep their position */
+            z.sample_ms = now_ms;
+            st.action = ZoneAction::Paused;
+            st.has_output = z.has_output;
+            st.output = z.applied;
+            return;
+        }
+        if (z.pi.active() && z.pi_medium != med) {
+            z.pi.stopController(); /* heating <-> cooling: restart bumpless */
+        }
+        z.pi_medium = med;
+        float e =
+            med == Medium::Heat ? zc.setpoint - st.temperature : st.temperature - zc.cool_setpoint;
         PiParams p = z.pi.params();
         if (!z.pi.active()) {
             float pos;
@@ -459,7 +492,9 @@ void ControlEngine::evalZone(uint8_t i, uint32_t now_ms)
         z.has_output = true;
         st.has_output = true;
         st.output = z.applied;
-        st.action = z.applied >= kHeatingThreshold ? ZoneAction::Heating : ZoneAction::Idle;
+        st.action = z.applied < kHeatingThreshold ? ZoneAction::Idle
+                    : med == Medium::Heat         ? ZoneAction::Heating
+                                                  : ZoneAction::Cooling;
         return;
     }
     case SourceState::Pending:
@@ -467,7 +502,10 @@ void ControlEngine::evalZone(uint8_t i, uint32_t now_ms)
             z.has_output = true;
             st.has_output = true;
             st.output = z.applied;
-            st.action = z.applied >= kHeatingThreshold ? ZoneAction::Heating : ZoneAction::Idle;
+            st.medium = z.pi_medium;
+            st.action = z.applied < kHeatingThreshold ? ZoneAction::Idle
+                        : z.pi_medium == Medium::Heat ? ZoneAction::Heating
+                                                      : ZoneAction::Cooling;
             return;
         }
         break;
@@ -486,6 +524,62 @@ void ControlEngine::evalZone(uint8_t i, uint32_t now_ms)
     z.has_output = false;
     st.has_output = false;
     st.action = ZoneAction::Hold;
+}
+
+Medium ControlEngine::evalMedium(uint8_t i, uint32_t now_ms)
+{
+    const ZoneConfig &zc = cfg_->zones[i];
+    const HvacConfig &h = cfg_->hvac;
+    ZoneRt &z = zone_[i];
+    ZoneStatus &st = z.status;
+
+    const char *sid = zc.supply_source[0] != '\0' ? zc.supply_source : h.supply_source;
+    const SourceStatus *sup = sid[0] != '\0' ? sourceById(sid) : nullptr;
+    st.has_supply = sup != nullptr && sup->has_value;
+    st.supply = st.has_supply ? sup->value : 0.0f;
+
+    if (sup == nullptr || sup->state != SourceState::Ok) {
+        /* no supply information: forced mode, else the last known medium
+         * (heating at the start); never paused */
+        Medium m = h.mode == HvacMode::Cool   ? Medium::Cool
+                   : h.mode == HvacMode::Heat ? Medium::Heat
+                                              : z.delivered;
+        z.medium = z.candidate = m;
+        z.medium_init = false; /* decide at once when the supply returns */
+        return m;
+    }
+
+    /* with hysteresis: a medium is kept down to half the margin */
+    float d = sup->value - st.temperature;
+    float m = h.supply_margin_k, keep = m / 2.0f;
+    Medium cand;
+    if (z.medium_init && z.medium == Medium::Heat && d > keep) {
+        cand = Medium::Heat;
+    } else if (z.medium_init && z.medium == Medium::Cool && d < -keep) {
+        cand = Medium::Cool;
+    } else {
+        cand = d >= m ? Medium::Heat : (d <= -m ? Medium::Cool : Medium::None);
+    }
+    if ((h.mode == HvacMode::Heat && cand == Medium::Cool) ||
+        (h.mode == HvacMode::Cool && cand == Medium::Heat)) {
+        cand = Medium::None; /* forced mode: the other medium pauses */
+    }
+
+    if (!z.medium_init) {
+        z.medium_init = true;
+        z.medium = z.candidate = cand;
+    } else if (cand == z.medium) {
+        z.candidate = cand;
+    } else if (cand != z.candidate) {
+        z.candidate = cand;
+        z.candidate_ms = now_ms;
+    } else if (now_ms - z.candidate_ms >= kMediumDwellMs) {
+        z.medium = cand;
+    }
+    if (z.medium != Medium::None) {
+        z.delivered = z.medium;
+    }
+    return z.medium;
 }
 
 void ControlEngine::evalValves()
@@ -629,6 +723,7 @@ uint8_t ControlEngine::snapshot(PiSnapshot *out, uint8_t max) const
         strncpy(s.zone_id, z.id, kIdSize - 1);
         s.integral = z.pi.integral();
         s.output = z.applied;
+        s.medium = static_cast<uint8_t>(z.pi_medium);
     }
     return n;
 }
@@ -640,11 +735,14 @@ void ControlEngine::restore(const PiSnapshot *in, uint8_t count)
     }
     for (uint8_t k = 0; k < count; k++) {
         int i = cfg_->zoneIndex(in[k].zone_id);
-        if (i < 0 || cfg_->zones[i].mode != ZoneMode::Control || !cfg_->zones[i].heating) {
+        if (i < 0 || cfg_->zones[i].mode != ZoneMode::Control || !cfg_->zones[i].enabled) {
             continue;
         }
         ZoneRt &z = zone_[i];
         z.pi.restore(in[k].integral, in[k].output);
+        z.pi_medium =
+            in[k].medium == static_cast<uint8_t>(Medium::Cool) ? Medium::Cool : Medium::Heat;
+        z.delivered = z.pi_medium;
         z.applied = z.pi.output();
         z.has_output = true;
         z.sample_ms = start_ms_;

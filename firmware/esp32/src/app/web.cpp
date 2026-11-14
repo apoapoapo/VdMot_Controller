@@ -204,8 +204,13 @@ void putControl(JsonObject o)
         zo["id"] = zc.id;
         zo["name"] = zc.name;
         zo["mode"] = vdm::zoneModeName(zc.mode);
-        zo["heating"] = zc.heating;
+        zo["enabled"] = zc.enabled;
         zo["setpoint"] = zc.setpoint;
+        zo["cool_setpoint"] = zc.cool_setpoint;
+        zo["medium"] = vdm::mediumName(z.medium);
+        if (z.has_supply) {
+            zo["supply"] = roundf(z.supply * 10.0f) / 10.0f;
+        }
         zo["source"] = vdm::sourceStateName(z.source);
         if (z.has_temperature) {
             zo["temperature"] = roundf(z.temperature * 100.0f) / 100.0f;
@@ -271,6 +276,7 @@ void handleState()
     esp["version"] = v;
     esp["uptime_s"] = millis() / 1000;
     esp["heap"] = ESP.getFreeHeap();
+    esp["heap_size"] = ESP.getHeapSize();
     esp["heap_min"] = ESP.getMinFreeHeap();
     esp["heap_block"] = ESP.getMaxAllocHeap();
     esp_app_desc_t prev;
@@ -559,7 +565,21 @@ void handleConfigImport()
     g_reboot_at = millis() + 1000;
 }
 
-/* setpoint, mode and heating of one zone */
+bool argTemp(const char *name, float lo, float hi, float &out, String &err)
+{
+    if (!server.hasArg(name)) {
+        return true;
+    }
+    float v = server.arg(name).toFloat();
+    if (v < lo || v > hi) {
+        err = String(name) + " must be " + String(lo, 0) + ".." + String(hi, 0) + " \u00b0C";
+        return false;
+    }
+    out = roundf(v * 10.0f) / 10.0f;
+    return true;
+}
+
+/* setpoints, mode and on/off of one zone; all values are checked first */
 void handleZone()
 {
     if (!authorized()) {
@@ -570,14 +590,12 @@ void handleZone()
         reply(false, "unknown zone");
         return;
     }
-    vdm::ZoneConfig &z = settingsEdit().zones[zi];
-    if (server.hasArg("setpoint")) {
-        float sp = server.arg("setpoint").toFloat();
-        if (sp < 5.0f || sp > 30.0f) {
-            reply(false, "setpoint must be 5..30 \u00b0C");
-            return;
-        }
-        z.setpoint = roundf(sp * 10.0f) / 10.0f;
+    vdm::ZoneConfig z = config().zones[zi];
+    String err;
+    if (!argTemp("setpoint", 5.0f, 30.0f, z.setpoint, err) ||
+        !argTemp("cool_setpoint", 15.0f, 35.0f, z.cool_setpoint, err)) {
+        reply(false, err);
+        return;
     }
     if (server.hasArg("mode")) {
         String m = server.arg("mode");
@@ -587,9 +605,12 @@ void handleZone()
         }
         z.mode = m == "control" ? vdm::ZoneMode::Control : vdm::ZoneMode::Manual;
     }
-    if (server.hasArg("heating")) {
-        z.heating = server.arg("heating") == "1" || server.arg("heating") == "true";
+    for (const char *k : {"enabled", "heating"}) {
+        if (server.hasArg(k)) {
+            z.enabled = server.arg(k) == "1" || server.arg(k) == "true";
+        }
     }
+    settingsEdit().zones[zi] = z;
     settingsChanged();
     reply(true);
 }
