@@ -295,7 +295,7 @@ $('zones').innerHTML=zs.map(z=>`<tr id="zr${z.id}"><td></td><td class=num></td><
 <td><input type=checkbox id="ht${z.id}" onchange="zoneCmd('${z.id}','enabled',this.checked?1:0)"></td>
 <td><select id="md${z.id}" onchange="zoneCmd('${z.id}','mode',this.value)">${opt('control','control')}${opt('manual','manual')}</select></td>
 <td class=num></td><td></td></tr>`).join('')}
-zs.forEach(z=>{const c=$('zr'+z.id).cells;c[0].textContent=z.name;
+zs.forEach(z=>{const c=$('zr'+z.id).cells;c[0].innerHTML=esc(z.name)+(z.sources?`<br><small class=mut>${esc(z.sources)}</small>`:'');
 c[1].textContent=z.temperature===undefined?'–':z.temperature.toFixed(1);c[1].className='num '+(z.source==='ok'?'':'warn');c[1].title='source: '+z.source;
 c[2].textContent=z.supply===undefined?'–':z.supply.toFixed(1);
 const sp=$('sp'+z.id),cp=$('cp'+z.id);if(!editing.has('sp'+z.id)&&document.activeElement!==sp)sp.value=z.setpoint;

@@ -328,7 +328,8 @@ the web page):
 |---|---|
 | `binary_sensor` STM32 link | connectivity (only needs the ESP32) |
 | `binary_sensor` Failsafe | problem |
-| `binary_sensor` Flow guard active | |
+| `binary_sensor` Flow guard intervening | the flow guard currently raises valves |
+| `number` Minimum total opening / Fallback position | configuration (`<base>/set` `{"min_total_pct":150}`, `{"fallback_pct":100}`) |
 | `select` Heating / cooling | `auto` / `heat` / `cool` (`hvac.mode`, command `<base>/set`) |
 | `sensor` Total valve opening | % (diagnostic) |
 | `sensor` per temperature source | °C |
@@ -347,13 +348,15 @@ area):
 | `select` Mode | `control` / `manual` |
 | `binary_sensor` Temperature missing | problem |
 | `sensor` State | heating, cooling, paused, fallback, … (diagnostic) |
+| `sensor` Control sources | e.g. "Office (MQTT), Return (1-Wire, stale)" (diagnostic) |
 | `sensor` per further temperature | the zone's `info_sources` |
 
 **Per enabled valve** (on its zone's device, or on the controller without a
-zone; channels disabled on the STM32 get no entities): `valve` with the
-actual position and opening/closing (commandable outside of mode
-`control`; the toggle opens or closes fully; attributes: the whole valve
-state), `sensor` position (actual, %),
+zone; channels disabled on the STM32 get no entities): `number` Target (slider
+0…100 %, the requested position), `sensor` Position (actual, %), `valve`
+(disabled by default; position and opening/closing, the toggle opens or
+closes fully, attributes: the whole valve state); Target and valve are
+**unavailable while the valve belongs to a zone in mode `control`**,
 `binary_sensor` fault (attributes: the whole valve state), `sensor` motor
 current and `button` calibrate (both disabled by default).
 

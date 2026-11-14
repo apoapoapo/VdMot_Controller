@@ -34,7 +34,7 @@ ConfigStore::ConfigStore(FileSystem &fs, const char *path)
 bool ConfigStore::toText(const Config &c, bool secrets, bool pretty, std::string &out)
 {
     out.clear();
-    DynamicJsonDocument doc(kConfigJsonCapacity);
+    DynamicJsonDocument doc(kConfigJsonWriteCapacity);
     if (doc.capacity() == 0) {
         return false;
     }

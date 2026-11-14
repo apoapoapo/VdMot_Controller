@@ -218,6 +218,9 @@ void putControl(JsonObject o)
         zo["setpoint"] = zc.setpoint;
         zo["cool_setpoint"] = zc.cool_setpoint;
         zo["medium"] = vdm::mediumName(z.medium);
+        char srcs[200];
+        e.controlSourcesText(i, srcs, sizeof(srcs));
+        zo["sources"] = srcs;
         zo["has_source"] = z.has_control_source;
         if (z.has_supply) {
             zo["supply"] = roundf(z.supply * 10.0f) / 10.0f;
@@ -478,7 +481,7 @@ void handleConfigGet()
     if (!authorized()) {
         return;
     }
-    DynamicJsonDocument doc(vdm::kConfigJsonCapacity);
+    DynamicJsonDocument doc(vdm::kConfigJsonWriteCapacity);
     if (!docAllocated(doc)) {
         return;
     }
@@ -523,20 +526,23 @@ void handleConfigSection()
     if (!authorized()) {
         return;
     }
-    DynamicJsonDocument in(16384);
-    if (!docAllocated(in)) {
-        return;
-    }
-    DeserializationError e = deserializeJson(in, server.arg("plain"));
-    if (e) {
-        reply(false, String("invalid JSON: ") + e.c_str());
-        return;
-    }
     char err[128];
-    if (!vdm::configApplySection(config(), server.arg("section").c_str(), in.as<JsonVariantConst>(),
-                                 g_next, err, sizeof(err))) {
-        reply(false, err);
-        return;
+    {
+        /* freed before saving, which needs its own buffers */
+        DynamicJsonDocument in(16384);
+        if (!docAllocated(in)) {
+            return;
+        }
+        DeserializationError e = deserializeJson(in, server.arg("plain"));
+        if (e) {
+            reply(false, String("invalid JSON: ") + e.c_str());
+            return;
+        }
+        if (!vdm::configApplySection(config(), server.arg("section").c_str(),
+                                     in.as<JsonVariantConst>(), g_next, err, sizeof(err))) {
+            reply(false, err);
+            return;
+        }
     }
     replyCommit(g_next);
 }

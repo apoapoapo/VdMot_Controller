@@ -657,6 +657,22 @@ void test_supply_shown_without_room_temperature()
     TEST_ASSERT_TRUE(eng->zone(1).has_control_source);
 }
 
+void test_control_sources_text()
+{
+    start(R"({
+      "sources": [{"id": "s1", "name": "Office", "type": "mqtt", "topic": "a", "max_age_s": 60},
+                  {"id": "s2", "name": "Return", "rom": "28-FF-01-02-03-04-05-06"}],
+      "zones": [{"id": "z1", "name": "Z", "control_sources": ["s1", "s2"]}],
+      "next_source_id": 3, "next_zone_id": 2})");
+    mqtt("a", "21");
+    run(1000);
+    char b[128];
+    eng->controlSourcesText(0, b, sizeof(b));
+    TEST_ASSERT_EQUAL_STRING("Office (MQTT), Return (1-Wire, pending)", b);
+    eng->controlSourcesText(0, b, 12); /* truncated cleanly */
+    TEST_ASSERT_TRUE(strlen(b) < 12);
+}
+
 int main()
 {
     UNITY_BEGIN();
@@ -686,5 +702,6 @@ int main()
     RUN_TEST(test_forced_mode);
     RUN_TEST(test_zone_supply_source_overrides);
     RUN_TEST(test_supply_shown_without_room_temperature);
+    RUN_TEST(test_control_sources_text);
     return UNITY_END();
 }

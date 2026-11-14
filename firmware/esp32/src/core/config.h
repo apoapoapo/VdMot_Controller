@@ -153,7 +153,10 @@ PiParams piParams(const ZoneConfig &z);
 
 /* Size of a JsonDocument that holds any configuration. Documents of this
  * size are only allocated temporarily (heap). */
-constexpr size_t kConfigJsonCapacity = 24576;
+constexpr size_t kConfigJsonCapacity = 24576 * sizeof(void *) / 4; /* host tests: 64 bit */
+/* Writing only: strings are referenced, not copied (measured: ~11 kB on
+ * the ESP32 for a full configuration). */
+constexpr size_t kConfigJsonWriteCapacity = 14336 * sizeof(void *) / 4;
 
 /* Writes the configuration into `obj`. Without `secrets` the passwords are
  * left out and replaced by "<field>_set": true/false. */

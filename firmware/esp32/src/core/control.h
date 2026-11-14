@@ -173,6 +173,10 @@ class ControlEngine
     {
         return flow_;
     }
+    /* "Office (MQTT), Return (1-Wire, stale)": the zone's control sources
+     * with type and, if not ok, their state */
+    void controlSourcesText(uint8_t zi, char *buf, size_t len) const;
+
     /* status of a source by id, nullptr if unknown */
     const SourceStatus *sourceById(const char *id) const;
 

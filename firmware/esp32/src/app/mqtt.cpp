@@ -33,7 +33,7 @@ namespace
 constexpr uint32_t kPublishCheckMs = 2000;
 constexpr uint32_t kRepublishMs = 5UL * 60UL * 1000UL; /* everything, even unchanged */
 constexpr size_t kTopicMax = 160;
-constexpr size_t kPayloadMax = 512;
+constexpr size_t kPayloadMax = 768;
 
 constexpr uint32_t kReconnectMs = 10000;
 
@@ -285,6 +285,8 @@ void publishStates(bool force)
         d["failsafe"] = failsafe;
         static const char *const kHvac[] = {"auto", "heat", "cool"};
         d["hvac_mode"] = kHvac[static_cast<uint8_t>(c.hvac.mode)];
+        d["min_total_pct"] = c.flow.min_total_pct;
+        d["fallback_pct"] = c.flow.fallback_pct;
         d["flow_guard"] = e.flow().active;
         d["flow_insufficient"] = e.flow().insufficient;
         d["flow_total"] = r1(e.flow().total / 10.0f);
@@ -307,8 +309,11 @@ void publishStates(bool force)
         const vdm::ZoneConfig &zc = c.zones[i];
         const vdm::ZoneStatus &z = e.zone(i);
         /* missing values are null, so templates in Home Assistant give "unknown" */
-        StaticJsonDocument<512> d;
+        StaticJsonDocument<768> d;
         d["name"] = zc.name;
+        char srcs[200];
+        e.controlSourcesText(i, srcs, sizeof(srcs));
+        d["sources"] = srcs;
         d["mode"] = vdm::zoneModeName(zc.mode);
         d["enabled"] = zc.enabled;
         d["setpoint"] = r1(zc.setpoint);
@@ -357,6 +362,7 @@ void publishStates(bool force)
             d["fault"] = s.fault <= VDM_FAULT_LAST ? kFaults[s.fault] : "?";
             d["current_ma"] = r1(s.current_ma10 / 10.0f);
         }
+        d["requested"] = (char *)nullptr;
         if (v.has_target) {
             d["requested"] = r1(v.requested / 10.0f);
             d["effective"] = r1(v.effective / 10.0f);
@@ -500,12 +506,32 @@ void valveCommand(const char *num, const char *payload, size_t len)
     g_last_check = 0;
 }
 
-/* <base>/set: {"hvac_mode":"cool"} */
+/* <base>/set: {"hvac_mode":"cool"}, {"min_total_pct":150}, {"fallback_pct":100} */
 void systemCommand(const char *payload, size_t len)
 {
     StaticJsonDocument<128> d;
     if (deserializeJson(d, payload, len) || !d.is<JsonObject>()) {
         return;
+    }
+    bool changed = false;
+    if (d["min_total_pct"].is<long>()) {
+        long v = d["min_total_pct"].as<long>();
+        if (v >= 0 && v <= 100L * VDM_MAX_CHANNELS) {
+            settingsEdit().flow.min_total_pct = static_cast<uint16_t>(v);
+            changed = true;
+        }
+    }
+    if (d["fallback_pct"].is<long>()) {
+        long v = d["fallback_pct"].as<long>();
+        if (v >= 0 && v <= 100) {
+            settingsEdit().flow.fallback_pct = static_cast<uint8_t>(v);
+            changed = true;
+        }
+    }
+    if (changed) {
+        settingsChanged();
+        controlKick();
+        g_last_check = 0;
     }
     const char *m = d["hvac_mode"];
     if (m != nullptr) {

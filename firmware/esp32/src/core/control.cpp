@@ -343,6 +343,32 @@ const char *ControlEngine::mqttTopic(uint8_t i, char *buf, size_t len) const
     return buf;
 }
 
+void ControlEngine::controlSourcesText(uint8_t zi, char *buf, size_t len) const
+{
+    size_t n = 0;
+    buf[0] = '\0';
+    if (cfg_ == nullptr || zi >= cfg_->zone_count || len == 0) {
+        return;
+    }
+    for (const auto &id : cfg_->zones[zi].control_sources) {
+        int si = cfg_->sourceIndex(id);
+        if (si < 0) {
+            continue;
+        }
+        const SourceConfig &s = cfg_->sources[si];
+        const SourceStatus &st = src_[si].status;
+        const char *type = s.type == SourceType::Mqtt ? "MQTT" : "1-Wire";
+        int w = st.state == SourceState::Ok
+                    ? snprintf(buf + n, len - n, "%s%s (%s)", n ? ", " : "", s.name, type)
+                    : snprintf(buf + n, len - n, "%s%s (%s, %s)", n ? ", " : "", s.name, type,
+                               sourceStateName(st.state));
+        if (w < 0 || static_cast<size_t>(w) >= len - n) {
+            break;
+        }
+        n += static_cast<size_t>(w);
+    }
+}
+
 const SourceStatus *ControlEngine::sourceById(const char *id) const
 {
     if (cfg_ == nullptr) {

@@ -24,10 +24,10 @@ namespace
 
 enum class Stage : uint8_t { Removed, Controller, Sources, Zones, Valves, Done };
 
-constexpr uint8_t kControllerItems = 5;
+constexpr uint8_t kControllerItems = 7;
 constexpr uint8_t kSourceItems = 1;
-constexpr uint8_t kZoneItems = 9 + vdm::kMaxInfoSources; /* + further temperatures */
-constexpr uint8_t kValveItems = 5;
+constexpr uint8_t kZoneItems = 10 + vdm::kMaxInfoSources; /* + further temperatures */
+constexpr uint8_t kValveItems = 6;
 constexpr uint8_t kMaxPerPass = 6;
 
 Stage g_stage = Stage::Done;
@@ -126,7 +126,10 @@ void zoneDevice(JsonObject o, const vdm::ZoneConfig &z)
 }
 
 /* ESP32 and STM32 must be online; optionally a third topic */
-void availability(JsonObject o, const char *extra = nullptr, bool link = true)
+/* ESP32 and STM32 must be online; optionally a third topic, with a
+ * template that renders "online"/"offline" */
+void availability(JsonObject o, const char *extra = nullptr, bool link = true,
+                  const char *extra_tpl = nullptr)
 {
     JsonArray a = o.createNestedArray("avty");
     a.createNestedObject()["t"] = "~/status";
@@ -134,7 +137,11 @@ void availability(JsonObject o, const char *extra = nullptr, bool link = true)
         a.createNestedObject()["t"] = "~/link";
     }
     if (extra != nullptr) {
-        a.createNestedObject()["t"] = const_cast<char *>(extra); /* copied */
+        JsonObject x = a.createNestedObject();
+        x["t"] = const_cast<char *>(extra); /* copied */
+        if (extra_tpl != nullptr) {
+            x["val_tpl"] = extra_tpl;
+        }
     }
     o["avty_mode"] = "all";
 }
@@ -176,7 +183,7 @@ bool buildController(uint8_t sub, Msg &m)
     case 2:
         m.component = "binary_sensor";
         strcpy(m.object, "flow_guard");
-        o = base(m, "Flow guard active");
+        o = base(m, "Flow guard intervening");
         o["stat_t"] = "~/state";
         o["val_tpl"] = "{{ 'ON' if value_json.flow_guard else 'OFF' }}";
         o["ic"] = "mdi:pipe-valve";
@@ -210,6 +217,27 @@ bool buildController(uint8_t sub, Msg &m)
         o["ent_cat"] = "diagnostic";
         availability(o);
         break;
+    case 5:
+    case 6: {
+        bool total = sub == 5;
+        m.component = "number";
+        strcpy(m.object, total ? "min_total" : "fallback");
+        o = base(m, total ? "Minimum total opening" : "Fallback position");
+        o["stat_t"] = "~/state";
+        o["val_tpl"] = total ? "{{ value_json.min_total_pct }}" : "{{ value_json.fallback_pct }}";
+        o["cmd_t"] = "~/set";
+        o["cmd_tpl"] = total ? "{\"min_total_pct\":{{ value | int }}}"
+                             : "{\"fallback_pct\":{{ value | int }}}";
+        o["min"] = 0;
+        o["max"] = total ? 100 * VDM_MAX_CHANNELS : 100;
+        o["step"] = total ? 10 : 5;
+        o["mode"] = "box";
+        o["unit_of_meas"] = "%";
+        o["ic"] = total ? "mdi:pipe-valve" : "mdi:valve-open";
+        o["ent_cat"] = "config";
+        availability(o, nullptr, false);
+        break;
+    }
     default:
         return false;
     }
@@ -380,9 +408,19 @@ bool buildZone(uint8_t idx, uint8_t sub, Msg &m)
         o["ent_cat"] = "diagnostic";
         availability(o);
         break;
+    case 9:
+        m.component = "sensor";
+        snprintf(m.object, sizeof(m.object), "%s_sources", z.id);
+        o = base(m, "Control sources");
+        o["stat_t"] = st;
+        o["val_tpl"] = "{{ value_json.sources if value_json.sources else 'none' }}";
+        o["ic"] = "mdi:thermometer-lines";
+        o["ent_cat"] = "diagnostic";
+        availability(o);
+        break;
     default: {
         /* further temperatures of the zone */
-        uint8_t k = static_cast<uint8_t>(sub - 9);
+        uint8_t k = static_cast<uint8_t>(sub - 10);
         if (k >= vdm::kMaxInfoSources) {
             return false;
         }
@@ -413,9 +451,10 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     const vdm::Config &c = config();
     if (!((g_enabled >> ch) & 1u)) {
         /* channel disabled on the STM32: no entities */
-        static const char *const kVComp[] = {"valve", "binary_sensor", "sensor", "button",
-                                             "sensor"};
-        static const char *const kVObj[] = {"valve", "fault", "current", "calibrate", "position"};
+        static const char *const kVComp[] = {"valve",  "binary_sensor", "sensor",
+                                             "button", "sensor",        "number"};
+        static const char *const kVObj[] = {"valve",     "fault",    "current",
+                                            "calibrate", "position", "target"};
         if (sub >= kValveItems) {
             return false;
         }
@@ -453,6 +492,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
         o["reports_position"] = true;
         o["json_attr_t"] = st;
         o["ic"] = "mdi:valve";
+        o["en"] = false; /* the "Target" number is easier to use */
         break;
     case 1:
         m.component = "binary_sensor";
@@ -498,10 +538,31 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
         o["stat_cla"] = "measurement";
         o["ic"] = "mdi:valve";
         break;
+    case 5:
+        m.component = "number";
+        snprintf(m.object, sizeof(m.object), "v%u_target", ch + 1u);
+        valveLabel(name, sizeof(name), "Target", suffix);
+        o = base(m, name);
+        o["stat_t"] = st;
+        o["val_tpl"] = "{{ value_json.requested }}";
+        o["cmd_t"] = set;
+        o["cmd_tpl"] = "{{ value }}";
+        o["min"] = 0;
+        o["max"] = 100;
+        o["step"] = 1;
+        o["mode"] = "slider";
+        o["unit_of_meas"] = "%";
+        o["ic"] = "mdi:valve";
+        break;
     default:
         return false;
     }
-    availability(o);
+    /* commands only outside of a zone in mode control */
+    if (sub == 0 || sub == 5) {
+        availability(o, st, true, "{{ 'offline' if value_json.controlled else 'online' }}");
+    } else {
+        availability(o);
+    }
     int zi = c.zoneIndex(v.zone);
     if (zi >= 0) {
         zoneDevice(o, c.zones[zi]);
@@ -534,9 +595,12 @@ bool removedObject(uint8_t idx, uint8_t sub, Msg &m)
     if (sub >= kZoneItems) {
         return false;
     }
-    if (sub >= 9) {
+    if (sub == 9) {
         m.component = "sensor";
-        snprintf(m.object, sizeof(m.object), "%s_info%u", g_rm_zones[idx], sub - 8u);
+        snprintf(m.object, sizeof(m.object), "%s_sources", g_rm_zones[idx]);
+    } else if (sub >= 10) {
+        m.component = "sensor";
+        snprintf(m.object, sizeof(m.object), "%s_info%u", g_rm_zones[idx], sub - 9u);
     } else {
         m.component = kComp[sub];
         snprintf(m.object, sizeof(m.object), "%s_%s", g_rm_zones[idx], kObj[sub]);

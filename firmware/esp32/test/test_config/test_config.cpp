@@ -360,6 +360,48 @@ void test_profiles()
     TEST_ASSERT_EQUAL(1200u, vdm::piParams(z).ti_s);
 }
 
+void test_full_configuration_fits()
+{
+    /* every list full, every text at its maximum length */
+    vdm::Config &c = cfg;
+    c.reset();
+    memset(c.device.name, 'N', 32);
+    for (uint8_t i = 0; i < vdm::kMaxSources; i++) {
+        vdm::SourceConfig &s = c.sources[i];
+        snprintf(s.id, sizeof(s.id), "s%u", i + 1u);
+        snprintf(s.name, sizeof(s.name), "%032u", i);
+        snprintf(s.short_name, sizeof(s.short_name), "%032u", i + 100u);
+        s.type = vdm::SourceType::Mqtt;
+        snprintf(s.topic, sizeof(s.topic), "%0127u", i);
+        snprintf(s.field, sizeof(s.field), "%031u", i);
+    }
+    c.source_count = vdm::kMaxSources;
+    c.next_source_id = 1000;
+    for (uint8_t i = 0; i < vdm::kMaxZones; i++) {
+        vdm::ZoneConfig &z = c.zones[i];
+        snprintf(z.id, sizeof(z.id), "z%u", i + 1u);
+        snprintf(z.name, sizeof(z.name), "%032u", i);
+        for (uint8_t k = 0; k < 4; k++) {
+            snprintf(z.control_sources[k], vdm::kIdSize, "s%u", k + 1u);
+            snprintf(z.info_sources[k], vdm::kIdSize, "s%u", k + 10u);
+        }
+        strcpy(z.supply_source, "s20");
+    }
+    c.zone_count = vdm::kMaxZones;
+    c.next_zone_id = 1000;
+    for (uint8_t i = 0; i < VDM_MAX_CHANNELS; i++) {
+        snprintf(c.valves[i].name, vdm::kNameSize, "%032u", i);
+        snprintf(c.valves[i].short_name, vdm::kNameSize, "%032u", i);
+        snprintf(c.valves[i].zone, vdm::kIdSize, "z%u", i + 1u);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(vdm::configValidate(c, err, sizeof(err)), err);
+    FakeFs fs;
+    vdm::ConfigStore store(fs);
+    TEST_ASSERT_TRUE(store.save(c));
+    TEST_ASSERT_EQUAL(vdm::LoadResult::Loaded, store.load(cfg2));
+    TEST_ASSERT_EQUAL_STRING(text(c, true).c_str(), text(cfg2, true).c_str());
+}
+
 int main()
 {
     UNITY_BEGIN();
@@ -376,5 +418,6 @@ int main()
     RUN_TEST(test_legacy_control_source_key);
     RUN_TEST(test_reset);
     RUN_TEST(test_profiles);
+    RUN_TEST(test_full_configuration_fits);
     return UNITY_END();
 }
