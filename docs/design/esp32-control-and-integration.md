@@ -308,10 +308,11 @@ not sent.
 
 Entity names: Home Assistant puts the device name in front. Sources have
 an optional `short_name` that replaces their name there. Valve entities are
-named "<function> <suffix>" (Valve, Position, Fault, Motor current,
-Calibrate); the suffix is the valve's `short_name`, or nothing if it is
-the only valve of its zone, otherwise its name. Example: "VdMot Office
-Position", "VdMot Bathroom Position front".
+named "Valve <function> <suffix>" (target, position, state, fault, motor
+current, calibrate); the suffix is the valve's `short_name`, or nothing if
+it is the only valve of its zone, otherwise its name. Example: "VdMot
+Office Valve position", "VdMot Bathroom Valve position front".
+
 Discovery messages are retained, sent step by step after connecting, after
 every configuration change and when Home Assistant announces
 `<prefix>/status = online`. Entities of zones or sources removed while the
@@ -340,25 +341,28 @@ area):
 
 | Entity | Content |
 |---|---|
-| `climate` (named like the zone) | current temperature; target = the setpoint in use (cooling setpoint while cold is supplied); modes `auto` (zone on) / `off`; action heating / cooling / idle / off; **unavailable in mode `manual`** |
-| `sensor` Temperature | zone temperature, also in mode `manual` |
-| `sensor` Controller output | % (before factor and limits; the real positions are the `valve` entities) |
+| `climate` (named like the zone) | mode `heat_cool` = the zone controls (mode `control`) with both setpoints as a range (low = heating, high = cooling; the supply temperature decides which is in use); mode `off` = control off (mode `manual`), the valves keep their position and are set with "Valve target"; current temperature; action heating / cooling / idle / off |
+| `sensor` Temperature | zone temperature |
+| `sensor` Controller output | % (before factor and limits) |
 | `sensor` Supply temperature | diagnostic |
-| `number` Heating setpoint / Cooling setpoint | configuration |
-| `select` Mode | `control` / `manual` |
+| `number` Heating setpoint / Cooling setpoint | configuration, disabled by default (the climate sets both) |
 | `binary_sensor` Temperature missing | problem |
 | `sensor` State | heating, cooling, paused, fallback, … (diagnostic) |
 | `sensor` Control sources | e.g. "Office (MQTT), Return (1-Wire, stale)" (diagnostic) |
 | `sensor` per further temperature | the zone's `info_sources` |
 
+The zone's on/off (`enabled`, valves at their minimum opening) is set on
+the web page or via MQTT; it is not part of the climate.
+
 **Per enabled valve** (on its zone's device, or on the controller without a
-zone; channels disabled on the STM32 get no entities): `number` Target (slider
-0…100 %, the requested position), `sensor` Position (actual, %), `valve`
-(disabled by default; position and opening/closing, the toggle opens or
-closes fully, attributes: the whole valve state); Target and valve are
-**unavailable while the valve belongs to a zone in mode `control`**,
-`binary_sensor` fault (attributes: the whole valve state), `sensor` motor
-current and `button` calibrate (both disabled by default).
+zone; channels disabled on the STM32 get no entities): `number` Valve
+target (slider 0…100 %, the requested position; **unavailable while the
+valve belongs to a zone in mode `control`**), `sensor` Valve position
+(actual, %), `sensor` Valve state (idle, opening, closing, fault – …;
+diagnostic), `binary_sensor` Valve fault (attributes: the whole valve
+state), `sensor` Valve motor current and `button` Valve calibrate (both
+disabled by default). Entities of earlier versions (valve entity, zone
+mode select) are deleted.
 
 **If HA controls the rooms itself:** set the zone to `manual` and use HA's
 own thermostat with the `valve` entities.

@@ -27,7 +27,7 @@ enum class Stage : uint8_t { Removed, Controller, Sources, Zones, Valves, Done }
 constexpr uint8_t kControllerItems = 7;
 constexpr uint8_t kSourceItems = 1;
 constexpr uint8_t kZoneItems = 10 + vdm::kMaxInfoSources; /* + further temperatures */
-constexpr uint8_t kValveItems = 6;
+constexpr uint8_t kValveItems = 7;
 constexpr uint8_t kMaxPerPass = 6;
 
 Stage g_stage = Stage::Done;
@@ -287,10 +287,9 @@ bool buildSource(uint8_t idx, Msg &m)
 bool buildZone(uint8_t idx, uint8_t sub, Msg &m)
 {
     const vdm::ZoneConfig &z = config().zones[idx];
-    char st[48], set[48], clim[48];
+    char st[48], set[48];
     snprintf(st, sizeof(st), "~/zone/%s/state", z.id);
     snprintf(set, sizeof(set), "~/zone/%s/set", z.id);
-    snprintf(clim, sizeof(clim), "~/zone/%s/climate", z.id);
     JsonObject o;
     switch (sub) {
     case 0:
@@ -299,28 +298,36 @@ bool buildZone(uint8_t idx, uint8_t sub, Msg &m)
         o = base(m, nullptr);
         o["curr_temp_t"] = st;
         o["curr_temp_tpl"] = "{{ value_json.temperature }}";
-        o["temp_stat_t"] = st;
-        o["temp_stat_tpl"] = "{{ value_json.target }}";
-        o["temp_cmd_t"] = set;
-        o["temp_cmd_tpl"] = "{\"target\":{{ value }}}";
+        /* heat_cool: the zone controls with both setpoints (low = heating,
+         * high = cooling; the supply temperature decides which one is in
+         * use); off: control off (mode manual), the valves keep their
+         * position and are set with "Valve target" */
+        o["temp_lo_stat_t"] = st;
+        o["temp_lo_stat_tpl"] = "{{ value_json.setpoint }}";
+        o["temp_lo_cmd_t"] = set;
+        o["temp_lo_cmd_tpl"] = "{\"setpoint\":{{ value }}}";
+        o["temp_hi_stat_t"] = st;
+        o["temp_hi_stat_tpl"] = "{{ value_json.cool_setpoint }}";
+        o["temp_hi_cmd_t"] = set;
+        o["temp_hi_cmd_tpl"] = "{\"cool_setpoint\":{{ value }}}";
         o["mode_stat_t"] = st;
-        o["mode_stat_tpl"] = "{{ 'auto' if value_json.enabled else 'off' }}";
+        o["mode_stat_tpl"] = "{{ 'heat_cool' if value_json.mode == 'control' else 'off' }}";
         o["mode_cmd_t"] = set;
-        o["mode_cmd_tpl"] = "{\"enabled\":\"{{ value }}\"}";
+        o["mode_cmd_tpl"] = "{\"mode\":\"{{ 'control' if value == 'heat_cool' else 'manual' }}\"}";
         {
             JsonArray modes = o.createNestedArray("modes");
-            modes.add("auto");
+            modes.add("heat_cool");
             modes.add("off");
         }
         o["act_t"] = st;
-        o["act_tpl"] = "{{ {'heating':'heating','cooling':'cooling','off':'off'}"
+        o["act_tpl"] = "{{ {'heating':'heating','cooling':'cooling','off':'off','manual':'off'}"
                        ".get(value_json.action, 'idle') }}";
         o["min_temp"] = 5;
         o["max_temp"] = 35;
         o["temp_step"] = 0.5;
         o["precision"] = 0.1;
         o["temp_unit"] = "C";
-        availability(o, clim);
+        availability(o); /* also in mode manual (= off) */
         break;
     case 1:
         m.component = "sensor";
@@ -370,25 +377,16 @@ bool buildZone(uint8_t idx, uint8_t sub, Msg &m)
         o["unit_of_meas"] = "\xC2\xB0"
                             "C";
         o["ent_cat"] = "config";
+        o["en"] = false; /* the climate sets both */
         availability(o);
         break;
     }
     case 6:
+        /* the mode select of earlier versions: the climate covers it */
         m.component = "select";
         snprintf(m.object, sizeof(m.object), "%s_mode", z.id);
-        o = base(m, "Mode");
-        o["stat_t"] = st;
-        o["val_tpl"] = "{{ value_json.mode }}";
-        o["cmd_t"] = set;
-        o["cmd_tpl"] = "{\"mode\":\"{{ value }}\"}";
-        {
-            JsonArray ops = o.createNestedArray("ops");
-            ops.add("control");
-            ops.add("manual");
-        }
-        o["ic"] = "mdi:tune-variant";
-        availability(o);
-        break;
+        g_remove = true;
+        return true;
     case 7:
         m.component = "binary_sensor";
         snprintf(m.object, sizeof(m.object), "%s_problem", z.id);
@@ -451,10 +449,10 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     const vdm::Config &c = config();
     if (!((g_enabled >> ch) & 1u)) {
         /* channel disabled on the STM32: no entities */
-        static const char *const kVComp[] = {"valve",  "binary_sensor", "sensor",
-                                             "button", "sensor",        "number"};
-        static const char *const kVObj[] = {"valve",     "fault",    "current",
-                                            "calibrate", "position", "target"};
+        static const char *const kVComp[] = {"valve",  "binary_sensor", "sensor", "button",
+                                             "sensor", "number",        "sensor"};
+        static const char *const kVObj[] = {"valve",    "fault",  "current", "calibrate",
+                                            "position", "target", "state"};
         if (sub >= kValveItems) {
             return false;
         }
@@ -479,25 +477,15 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     char name[64];
     switch (sub) {
     case 0:
+        /* the valve entity of earlier versions: replaced by "Valve target" */
         m.component = "valve";
         snprintf(m.object, sizeof(m.object), "v%u_valve", ch + 1u);
-        valveLabel(name, sizeof(name), "Valve", suffix);
-        o = base(m, name);
-        /* position (actual) and opening/closing; commands are the target in % */
-        o["cmd_t"] = set;
-        o["stat_t"] = st;
-        o["val_tpl"] = "{% if value_json.position is none %}None{% else %}"
-                       "{{ {'position': value_json.position, 'state': value_json.mode} | tojson }}"
-                       "{% endif %}";
-        o["reports_position"] = true;
-        o["json_attr_t"] = st;
-        o["ic"] = "mdi:valve";
-        o["en"] = false; /* the "Target" number is easier to use */
-        break;
+        g_remove = true;
+        return true;
     case 1:
         m.component = "binary_sensor";
         snprintf(m.object, sizeof(m.object), "v%u_fault", ch + 1u);
-        valveLabel(name, sizeof(name), "Fault", suffix);
+        valveLabel(name, sizeof(name), "Valve fault", suffix);
         o = base(m, name);
         o["stat_t"] = st;
         o["val_tpl"] = "{{ 'ON' if value_json.fault or value_json.mode == 'fault' else 'OFF' }}";
@@ -507,7 +495,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 2:
         m.component = "sensor";
         snprintf(m.object, sizeof(m.object), "v%u_current", ch + 1u);
-        valveLabel(name, sizeof(name), "Motor current", suffix);
+        valveLabel(name, sizeof(name), "Valve motor current", suffix);
         o = base(m, name);
         o["stat_t"] = st;
         o["val_tpl"] = "{{ value_json.current_ma }}";
@@ -520,7 +508,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 3:
         m.component = "button";
         snprintf(m.object, sizeof(m.object), "v%u_calibrate", ch + 1u);
-        valveLabel(name, sizeof(name), "Calibrate", suffix);
+        valveLabel(name, sizeof(name), "Valve calibrate", suffix);
         o = base(m, name);
         o["cmd_t"] = set;
         o["pl_prs"] = "{\"calibrate\":true}";
@@ -530,7 +518,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 4:
         m.component = "sensor";
         snprintf(m.object, sizeof(m.object), "v%u_position", ch + 1u);
-        valveLabel(name, sizeof(name), "Position", suffix);
+        valveLabel(name, sizeof(name), "Valve position", suffix);
         o = base(m, name);
         o["stat_t"] = st;
         o["val_tpl"] = "{{ value_json.position }}";
@@ -541,7 +529,7 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
     case 5:
         m.component = "number";
         snprintf(m.object, sizeof(m.object), "v%u_target", ch + 1u);
-        valveLabel(name, sizeof(name), "Target", suffix);
+        valveLabel(name, sizeof(name), "Valve target", suffix);
         o = base(m, name);
         o["stat_t"] = st;
         o["val_tpl"] = "{{ value_json.requested }}";
@@ -554,11 +542,21 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
         o["unit_of_meas"] = "%";
         o["ic"] = "mdi:valve";
         break;
+    case 6:
+        m.component = "sensor";
+        snprintf(m.object, sizeof(m.object), "v%u_state", ch + 1u);
+        valveLabel(name, sizeof(name), "Valve state", suffix);
+        o = base(m, name);
+        o["stat_t"] = st;
+        o["val_tpl"] = "{{ value_json.mode }}{{ ' - ' ~ value_json.fault if value_json.fault }}";
+        o["ic"] = "mdi:valve";
+        o["ent_cat"] = "diagnostic";
+        break;
     default:
         return false;
     }
     /* commands only outside of a zone in mode control */
-    if (sub == 0 || sub == 5) {
+    if (sub == 5) {
         availability(o, st, true, "{{ 'offline' if value_json.controlled else 'online' }}");
     } else {
         availability(o);
