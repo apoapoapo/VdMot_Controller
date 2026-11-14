@@ -188,16 +188,26 @@ Done (2b), see the design [`../design/esp32-control-and-integration.md`](../desi
   log), network from the configuration, web page with tabs (overview,
   rooms & valves, settings, system) and configuration export/import.
 
-Open: syslog, MQTT sources take effect with phase 3.
+Also done in 2b (from the first hardware tests): heating and cooling from
+the supply temperature with a pause while nothing is supplied (zones
+independent), several control sources per zone (mean), calibration ending
+fully open (STM32).
 
-### Phase 3 – MQTT / Home Assistant
-- LWT + birth message, `availability_topic`, client id derived from MAC.
-- `unique_id` from MAC + channel (stable across renames).
-- Discovery on connect and on `homeassistant/status = online`, non-blocking.
-- Per valve: `valve` (real position), `climate` (if PI control is active),
-  `sensor` (current, temperatures, counters as `total_increasing`), `button`
-  (calibrate), `binary_sensor` (fault), `number` with min/max/step.
-- JSON payloads + `value_template`; no more format variants.
+Open: syslog.
+
+### Phase 3 – MQTT / Home Assistant (done)
+- PubSubClient in its own task, LWT `<base>/status`, client id derived
+  from the MAC (configurable), states on change and every 5 minutes,
+  commands for zones, valves and global settings; MQTT temperature
+  sources.
+- Home Assistant discovery: controller device and one device per zone
+  (climate `heat_cool`/`off` with both setpoints, valve target sliders
+  that are unavailable while the zone controls, positions, states,
+  faults, further temperatures); `unique_id`s from the client id, entities
+  of removed zones/sources deleted; checked against the discovery
+  schemas of Home Assistant.
+- Blueprint `blueprints/automation/vdmot/send_temperature.yaml` to send
+  Home Assistant temperature sensors to MQTT sources.
 
 ### Phase 4 – Web UI
 - New, small, built against the REST/WebSocket API; build step integrated into PlatformIO.

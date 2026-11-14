@@ -136,7 +136,21 @@ What to check and report:
 - Settings → Device / Network: change something, restart, check it is kept.
   **Export configuration** once and keep the file.
 
-## 7. Going back to the legacy firmware
+## 7. MQTT and Home Assistant
+
+1. Settings → MQTT: enable, broker, user, password; the header shows
+   "MQTT connected". Home Assistant discovery is on by default.
+2. Home Assistant shows a device for the controller and one per zone.
+3. Room temperatures from Home Assistant: per room an MQTT source with an
+   empty topic; import the blueprint
+   `blueprints/automation/vdmot/send_temperature.yaml` and create one
+   automation per room (sensor + the topic shown below the source's topic
+   field). Assign the sources to the zones as control temperature.
+4. Check: climate `heat_cool` controls with both setpoints, `off` lets the
+   "Valve target" sliders set the valves; the zone's "State" and "Control
+   sources" match the web page.
+
+## 8. Going back to the legacy firmware
 
 1. v2 page → **Start previous ESP32 firmware**: the ESP32 restarts with
    the firmware still stored in its other OTA slot (the legacy 1.4.x).
@@ -147,7 +161,7 @@ update.
 
 ## Known limitations of this test version
 
-- No MQTT / Home Assistant yet (phase 3): MQTT settings and MQTT
-  temperature sources can be configured but are not used yet.
+- Web page over plain HTTP and MQTT without TLS: use them in the local
+  network only.
 - The current measurement scale (138 µA per ADC digit) and the default
   thresholds are taken from the legacy firmware.

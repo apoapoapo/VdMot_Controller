@@ -213,8 +213,9 @@ temperature `T`, with `hvac.supply_margin_k` = `m` (default 2 K):
 - Dew point protection is left to the heat pump (it limits the supply
   temperature in cooling mode).
 
-In Home Assistant the zone's `climate` gets the modes heat/cool/off and
-the action heating/cooling/idle (phase 3).
+In Home Assistant the zone's `climate` has the modes `heat_cool` (control
+with both setpoints) and `off` (mode `manual`), and the action
+heating/cooling/idle/off (section 8).
 
 ## 5. Flow guard (minimum flow)
 
@@ -278,7 +279,7 @@ full every 5 minutes; commands are not retained. Valves are numbered 1…12.
 | `<base>/link` | out | `online` / `offline` (STM32 link) |
 | `<base>/state` | out | `{failsafe, flow_guard, flow_insufficient, flow_total, flow_added, esp_version, stm_version}` |
 | `<base>/zone/<zid>/state` | out | `{mode, enabled, setpoint, cool_setpoint, temperature, supply, source, stale, medium, output, action}` |
-| `<base>/zone/<zid>/climate` | out | `online` in mode `control`, `offline` in mode `manual` (availability of the climate entity) |
+| `<base>/zone/<zid>/climate` | out | `online` in mode `control`, `offline` in mode `manual` (informational; the climate entity no longer uses it) |
 | `<base>/zone/<zid>/set` | in | any of `{"setpoint":21.5, "cool_setpoint":24, "enabled":false, "mode":"manual"}`; `enabled` also takes `"on"`/`"off"`/`"heat"`/`"cool"` |
 | `<base>/valve/<n>/state` | out | `{name, zone, position, target, requested, effective, mode, fault, current_ma, controlled}` |
 | `<base>/valve/<n>/set` | in | `{"position":40}` or a plain `40` (valves outside of a controlled zone), `{"calibrate":true}` |
@@ -320,7 +321,8 @@ ESP32 runs are deleted; the `unique_id`s are `<client id>_<object>`, e.g.
 `vdmot-a1b2c3_z1_climate`, so renaming never creates new entities.
 
 **Availability:** `<base>/status` **and** `<base>/link` (mode `all`); the
-climate additionally `<base>/zone/<zid>/climate`.
+valve targets additionally depend on the valve state (unavailable while
+controlled).
 
 **Controller device** (`<client id>`, with firmware version and a link to
 the web page):
@@ -388,7 +390,7 @@ New sections in the existing style; the full redesign follows in phase 4:
 |---|---|
 | 2b-1 | configuration store, migration of the network settings, settings pages for network/device/MQTT |
 | 2b-2 | temperature sources, zones, valves, flow guard, PI controller, host tests with a room model |
-| 3 | MQTT and HA discovery as described in 7 and 8 |
+| 3 | MQTT and HA discovery as described in 7 and 8, blueprint for room temperatures |
 | later | KNX adapter on the same model (setpoint, actual value, output, mode per zone; sources of type `knx`) |
 
 ## 11. Decisions and later ideas
