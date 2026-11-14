@@ -60,13 +60,16 @@ void topicFor(const Msg &m)
              m.component, mqttClient(), m.object);
 }
 
+/* Note: ArduinoJson 6 keeps a const char* as a pointer and copies a char*.
+ * Everything that is not a literal is assigned as char*, since the document
+ * is serialized after the builder returned. */
 JsonObject base(const Msg &m, const char *name)
 {
     g_doc->clear();
     JsonObject o = g_doc->to<JsonObject>();
     o["~"] = mqttBase();
     if (name != nullptr) {
-        o["name"] = name;
+        o["name"] = const_cast<char *>(name); /* copied: may be a local buffer */
     } else {
         o["name"] = (char *)nullptr; /* the device name */
     }
@@ -80,7 +83,7 @@ void controllerDevice(JsonObject o)
 {
     JsonObject d = o.createNestedObject("dev");
     d.createNestedArray("ids").add(mqttClient());
-    d["name"] = config().device.name;
+    d["name"] = const_cast<char *>(config().device.name);
     d["mf"] = "VdMot";
     d["mdl"] = "VdMot Controller v2";
     char v[24];
@@ -115,7 +118,7 @@ void availability(JsonObject o, const char *extra = nullptr, bool link = true)
         a.createNestedObject()["t"] = "~/link";
     }
     if (extra != nullptr) {
-        a.createNestedObject()["t"] = extra;
+        a.createNestedObject()["t"] = const_cast<char *>(extra); /* copied */
     }
     o["avty_mode"] = "all";
 }
@@ -198,11 +201,34 @@ bool buildController(uint8_t sub, Msg &m)
     return true;
 }
 
+/* used by a zone (control or further temperature): shown there instead */
+bool usedByZone(const char *id)
+{
+    const vdm::Config &c = config();
+    for (uint8_t i = 0; i < c.zone_count; i++) {
+        for (const auto &x : c.zones[i].control_sources) {
+            if (strcmp(x, id) == 0) {
+                return true;
+            }
+        }
+        for (const auto &x : c.zones[i].info_sources) {
+            if (strcmp(x, id) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool buildSource(uint8_t idx, Msg &m)
 {
     const vdm::SourceConfig &s = config().sources[idx];
     m.component = "sensor";
     snprintf(m.object, sizeof(m.object), "%s", s.id);
+    if (usedByZone(s.id)) {
+        g_remove = true; /* the zone shows it */
+        return true;
+    }
     JsonObject o = base(m, s.name);
     char t[48];
     snprintf(t, sizeof(t), "~/source/%s/state", s.id);
