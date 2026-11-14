@@ -102,10 +102,20 @@ void sendJson(const JsonDocument &doc)
     serializeJson(doc, w);
 }
 
-bool docAllocated(const JsonDocument &doc)
+/* false (and a 503 answer) if the document could not get its memory; logged
+ * at most once a minute */
+bool docAllocated(const JsonDocument &doc, size_t wanted)
 {
     if (doc.capacity() > 0) {
         return true;
+    }
+    static uint32_t last_log = 0;
+    if (last_log == 0 || millis() - last_log > 60000) {
+        last_log = millis();
+        espLog(VDM_LOG_WARN, "web %s: no memory for %u bytes (free %lu, largest block %lu)",
+               server.uri().c_str(), static_cast<unsigned>(wanted),
+               static_cast<unsigned long>(ESP.getFreeHeap()),
+               static_cast<unsigned long>(ESP.getMaxAllocHeap()));
     }
     server.send(503, "application/json", "{\"ok\":false,\"error\":\"ESP32 out of memory\"}");
     return false;
@@ -279,8 +289,13 @@ void handleState()
     readModel(g_model, err, sizeof(err));
     const vdm::Model &m = g_model;
 
-    DynamicJsonDocument doc(40960);
-    if (!docAllocated(doc)) {
+    /* sized from the content, so no large block is needed (a fragmented heap
+     * may not have one): fixed part, valves, sensors, zones, sources */
+    const vdm::Config &cfg = config();
+    size_t cap = 6144 + VDM_MAX_CHANNELS * 400u + m.sensor_total * 160u + cfg.zone_count * 560u +
+                 cfg.source_count * 96u;
+    DynamicJsonDocument doc(cap);
+    if (!docAllocated(doc, cap)) {
         return;
     }
     JsonObject esp = doc.createNestedObject("esp");
@@ -423,28 +438,54 @@ void handleState()
 
     putControl(doc.createNestedObject("ctl"));
 
-    JsonArray log = doc.createNestedArray("log");
-    for (uint8_t i = 0; i < m.log_count; i++) {
-        const vdm::LogEntry &e = m.log[(m.log_head + i) % vdm::Model::kLogSize];
-        JsonObject o = log.createNestedObject();
-        o["ms"] = e.ms;
-        o["level"] = e.level;
-        o["text"] = e.text;
-        o["src"] = "stm";
-    }
-    vdm::LogEntry e; /* one at a time: no copy of the whole log */
-    for (uint8_t i = 0; espLogGet(i, e); i++) {
-        JsonObject o = log.createNestedObject();
-        o["ms"] = e.ms;
-        o["level"] = e.level;
-        o["text"] = e.text; /* char array: copied */
-        o["src"] = "esp";
-    }
     doc["error"] = err;
     if (doc.overflowed()) {
         doc["truncated"] = true;
+        espLog(VDM_LOG_WARN, "web /api/state: %u bytes were not enough",
+               static_cast<unsigned>(cap));
     }
     sendJson(doc);
+}
+
+/* the logs of both controllers, entry by entry (chunked), without a large
+ * document */
+void sendLogEntry(const vdm::LogEntry &e, const char *src, bool &first)
+{
+    StaticJsonDocument<96> d;
+    d["ms"] = e.ms;
+    d["level"] = e.level;
+    d["text"] = e.text; /* const: referenced, serialized right away */
+    d["src"] = src;
+    char buf[sizeof(e.text) * 2 + 80];
+    size_t n = 0;
+    if (!first) {
+        buf[n++] = ',';
+    }
+    first = false;
+    n += serializeJson(d, buf + n, sizeof(buf) - n);
+    server.sendContent(buf, n);
+}
+
+void handleLog()
+{
+    if (!authorized()) {
+        return;
+    }
+    char err[8];
+    readModel(g_model, err, sizeof(err));
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server.send(200, "application/json", "");
+    server.sendContent("[");
+    bool first = true;
+    for (uint8_t i = 0; i < g_model.log_count; i++) {
+        sendLogEntry(g_model.log[(g_model.log_head + i) % vdm::Model::kLogSize], "stm", first);
+    }
+    vdm::LogEntry e; /* one at a time: no copy of the whole log */
+    for (uint8_t i = 0; espLogGet(i, e); i++) {
+        sendLogEntry(e, "esp", first);
+    }
+    server.sendContent("]");
+    server.sendContent(""); /* end of the chunked answer */
 }
 
 void handleTarget()
@@ -481,7 +522,7 @@ void handleConfigGet()
         return;
     }
     DynamicJsonDocument doc(vdm::kConfigJsonWriteCapacity);
-    if (!docAllocated(doc)) {
+    if (!docAllocated(doc, vdm::kConfigJsonWriteCapacity)) {
         return;
     }
     vdm::configToJson(config(), doc.to<JsonObject>(), false);
@@ -529,7 +570,7 @@ void handleConfigSection()
     {
         /* freed before saving, which needs its own buffers */
         DynamicJsonDocument in(16384);
-        if (!docAllocated(in)) {
+        if (!docAllocated(in, 16384)) {
             return;
         }
         DeserializationError e = deserializeJson(in, server.arg("plain"));
@@ -900,6 +941,7 @@ void webBegin()
 {
     server.on("/", HTTP_GET, handleIndex);
     server.on("/api/state", HTTP_GET, handleState);
+    server.on("/api/log", HTTP_GET, handleLog);
     server.on("/api/target", HTTP_POST, handleTarget);
     server.on("/api/calibrate", HTTP_POST, [] { handleMaskCommand(CommandType::Calibrate); });
     server.on("/api/detect", HTTP_POST, [] { handleMaskCommand(CommandType::Detect); });

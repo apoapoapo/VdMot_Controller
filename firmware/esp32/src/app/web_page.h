@@ -395,9 +395,13 @@ if(ask)$('upd').textContent='Press the RESET button on the STM32 (BlackPill) now
 const e=s.esp;if(e.heap_size){const used=100-e.heap*100/e.heap_size,peak=100-e.heap_min*100/e.heap_size;$('heapbar').value=used;
 $('heaptxt').textContent=`${used.toFixed(0)} % (${(e.heap/1024).toFixed(0)} of ${(e.heap_size/1024).toFixed(0)} kB free) · peak ${peak.toFixed(0)} % · largest free block ${(e.heap_block/1024).toFixed(0)} kB`}
 const d=Object.assign({},s.link.stats,s.diag||{});$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
+lastUptime=s.esp.uptime_s;if(location.hash==='#sys')loadLog()}
+/* the log has its own request, only while the System tab is open */
+let lastUptime=0;
+async function loadLog(){let l;try{const r=await fetch('/api/log');if(!r.ok)return;l=await r.json()}catch(e){return}
 /* log times: ESP32 milliseconds since start → clock time of the browser */
-const t0=Date.now()-s.esp.uptime_s*1000;
-$('log').innerHTML=s.log.slice().sort((a,b)=>b.ms-a.ms).map(e=>`<tr><td class=mut>${new Date(t0+e.ms).toLocaleTimeString()}</td><td>${e.src==='esp'?'ESP32':'STM32'}</td><td class="${['bad','warn','',''][e.level]}">${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
+const t0=Date.now()-lastUptime*1000;
+$('log').innerHTML=l.sort((a,b)=>b.ms-a.ms).map(e=>`<tr><td class=mut>${new Date(t0+e.ms).toLocaleTimeString()}</td><td>${e.src==='esp'?'ESP32':'STM32'}</td><td class="${['bad','warn','',''][e.level]}">${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
 loadCfg().then(refresh);setInterval(refresh,2000);
 </script></body></html>)HTML";
 
