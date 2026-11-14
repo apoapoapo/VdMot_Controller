@@ -378,6 +378,13 @@ const SourceStatus *ControlEngine::sourceById(const char *id) const
     return i < 0 ? nullptr : &src_[i].status;
 }
 
+uint32_t ControlEngine::pendingMs(const SourceConfig &s)
+{
+    uint32_t ms = s.max_age_s == 0 || s.max_age_s > kPendingMaxMs / 1000u ? kPendingMaxMs
+                                                                        : s.max_age_s * 1000u;
+    return ms < kStartupGraceMs ? kStartupGraceMs : ms;
+}
+
 void ControlEngine::evalSource(uint8_t i, uint32_t now_ms)
 {
     const SourceConfig &sc = cfg_->sources[i];
@@ -386,7 +393,7 @@ void ControlEngine::evalSource(uint8_t i, uint32_t now_ms)
     st.has_value = s.has_value;
     if (!s.has_value) {
         st.state =
-            now_ms - start_ms_ < kStartupGraceMs ? SourceState::Pending : SourceState::Missing;
+            now_ms - start_ms_ < pendingMs(sc) ? SourceState::Pending : SourceState::Missing;
         st.age_s = 0;
         return;
     }
