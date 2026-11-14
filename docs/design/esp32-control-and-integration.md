@@ -164,8 +164,9 @@ A PI controller per zone in `control` mode.
   factor is not applied, the limits are. A diagnostic flag is set and a log
   entry written. When values arrive again, control resumes; the first
   integration step after the pause is capped at two sample times.
-- **Start-up:** a source without a value is *pending* for 120 s after the
-  start. Meanwhile the valves keep their position (or the restored
+- **Start-up:** a source without a value is *pending* after the start for
+  its `max_age_s`, at least 120 s and at most 15 minutes (MQTT publishers
+  may send only every few minutes). Meanwhile the valves keep their position (or the restored
   controller output); only after that a missing value leads to the
   fallback position. The controller starts bumpless from the current
   valve positions, so it waits until the STM32 has reported them.
@@ -303,7 +304,8 @@ Assistant import the blueprint
 and create one automation per room: choose the sensor, paste the topic.
 It publishes on every change, at the start of Home Assistant and every 5
 minutes, so `max_age_s` can stay at its default; non-numeric states are
-not sent.
+not sent. The value is retained, so the controller gets it at once after
+a restart.
 
 ## 8. Home Assistant (discovery)
 

@@ -103,15 +103,14 @@ void espLog(uint8_t level, const char *fmt, ...)
     g_log[idx] = e;
 }
 
-uint8_t espLogCopy(vdm::LogEntry *out, uint8_t max)
+bool espLogGet(uint8_t i, vdm::LogEntry &out)
 {
     Lock l;
-    uint8_t n = g_log_count < max ? g_log_count : max;
-    uint8_t first = static_cast<uint8_t>(g_log_count - n);
-    for (uint8_t i = 0; i < n; i++) {
-        out[i] = g_log[(g_log_head + first + i) % kEspLogSize];
+    if (i >= g_log_count) {
+        return false;
     }
-    return n;
+    out = g_log[(g_log_head + i) % kEspLogSize];
+    return true;
 }
 
 } // namespace app

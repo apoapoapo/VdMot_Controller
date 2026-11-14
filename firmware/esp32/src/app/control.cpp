@@ -38,6 +38,8 @@ uint32_t g_last_failsafe_sync = 0;
 uint16_t g_sent[VDM_MAX_CHANNELS] = {};
 uint16_t g_sent_valid = 0;
 vdm::ZoneAction g_last_action[vdm::kMaxZones] = {};
+vdm::SourceState g_last_source[vdm::kMaxSources] = {};
+bool g_heap_low = false;
 bool g_last_insufficient = false;
 
 uint16_t rtcCrc()
@@ -84,6 +86,28 @@ void logChanges()
             espLog(VDM_LOG_INFO, "zone %s: temperature available again", c.zones[i].name);
         }
     }
+    for (uint8_t i = 0; i < c.source_count; i++) {
+        vdm::SourceState st = g_engine.source(i).state;
+        vdm::SourceState was = g_last_source[i];
+        g_last_source[i] = st;
+        bool bad = st == vdm::SourceState::Stale || st == vdm::SourceState::Missing;
+        bool was_bad = was == vdm::SourceState::Stale || was == vdm::SourceState::Missing;
+        if (bad && !was_bad) {
+            espLog(VDM_LOG_WARN, "source %s: %s", c.sources[i].name, vdm::sourceStateName(st));
+        } else if (!bad && was_bad && st == vdm::SourceState::Ok) {
+            espLog(VDM_LOG_INFO, "source %s: values again", c.sources[i].name);
+        }
+    }
+
+    /* memory: warn once below 30 kB, again after it recovered above 45 kB */
+    uint32_t heap = ESP.getFreeHeap();
+    if (!g_heap_low && heap < 30000) {
+        g_heap_low = true;
+        espLog(VDM_LOG_WARN, "ESP32 memory low: %lu bytes free", static_cast<unsigned long>(heap));
+    } else if (g_heap_low && heap > 45000) {
+        g_heap_low = false;
+    }
+
     bool insufficient = g_engine.flow().insufficient;
     if (insufficient != g_last_insufficient) {
         g_last_insufficient = insufficient;

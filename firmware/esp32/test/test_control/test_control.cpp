@@ -201,11 +201,16 @@ void test_startup_hold_then_fallback()
     stmReady(300);
     run(10000);
     TEST_ASSERT_EQUAL(SourceState::Pending, eng->source(0).state);
+    TEST_ASSERT_EQUAL(ZoneAction::Hold, eng->zone(0).action); /* no values yet */
     TEST_ASSERT_EQUAL(ZoneAction::Hold, eng->zone(0).action);
     TEST_ASSERT_TRUE(eng->valve(0).has_target);
     TEST_ASSERT_EQUAL(300, eng->valve(0).effective); /* keeps the STM32 target */
 
+    /* MQTT source with max_age 600 s: pending (valves kept) for 600 s */
     run(ControlEngine::kStartupGraceMs);
+    TEST_ASSERT_EQUAL(SourceState::Pending, eng->source(0).state);
+    TEST_ASSERT_EQUAL(300, eng->valve(0).effective);
+    run(600000);
     TEST_ASSERT_EQUAL(SourceState::Missing, eng->source(0).state);
     TEST_ASSERT_EQUAL(ZoneAction::Fallback, eng->zone(0).action);
     TEST_ASSERT_EQUAL(1000, eng->valve(0).effective); /* global fallback 100 % */
@@ -649,7 +654,7 @@ void test_supply_shown_without_room_temperature()
     start(kHvac);
     cfg.zones[0].control_sources[0][0] = '\0';
     mqtt("supply", "33");
-    run(ControlEngine::kStartupGraceMs + 1000);
+    run(ControlEngine::kPendingMaxMs + 1000); /* max_age 0: pending for the maximum */
     TEST_ASSERT_EQUAL(ZoneAction::Fallback, eng->zone(0).action);
     TEST_ASSERT_FALSE(eng->zone(0).has_control_source);
     TEST_ASSERT_TRUE(eng->zone(0).has_supply);

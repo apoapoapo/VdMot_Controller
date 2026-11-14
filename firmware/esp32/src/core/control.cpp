@@ -378,6 +378,13 @@ const SourceStatus *ControlEngine::sourceById(const char *id) const
     return i < 0 ? nullptr : &src_[i].status;
 }
 
+uint32_t ControlEngine::pendingMs(const SourceConfig &s)
+{
+    uint32_t ms = s.max_age_s == 0 || s.max_age_s > kPendingMaxMs / 1000u ? kPendingMaxMs
+                                                                          : s.max_age_s * 1000u;
+    return ms < kStartupGraceMs ? kStartupGraceMs : ms;
+}
+
 void ControlEngine::evalSource(uint8_t i, uint32_t now_ms)
 {
     const SourceConfig &sc = cfg_->sources[i];
@@ -385,8 +392,7 @@ void ControlEngine::evalSource(uint8_t i, uint32_t now_ms)
     SourceStatus &st = s.status;
     st.has_value = s.has_value;
     if (!s.has_value) {
-        st.state =
-            now_ms - start_ms_ < kStartupGraceMs ? SourceState::Pending : SourceState::Missing;
+        st.state = now_ms - start_ms_ < pendingMs(sc) ? SourceState::Pending : SourceState::Missing;
         st.age_s = 0;
         return;
     }
@@ -535,14 +541,14 @@ void ControlEngine::evalZone(uint8_t i, uint32_t now_ms)
         return;
     }
     case SourceState::Pending:
-        if (z.pi.active()) { /* restored after a restart */
+        if (z.pi.active()) {
+            /* restored after a restart: keep the output, but no values yet,
+             * so neither heating nor cooling is claimed */
             z.has_output = true;
             st.has_output = true;
             st.output = z.applied;
             st.medium = z.pi_medium;
-            st.action = z.applied < kHeatingThreshold ? ZoneAction::Idle
-                        : z.pi_medium == Medium::Heat ? ZoneAction::Heating
-                                                      : ZoneAction::Cooling;
+            st.action = ZoneAction::Hold;
             return;
         }
         break;

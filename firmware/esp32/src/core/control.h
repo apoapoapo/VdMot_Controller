@@ -127,7 +127,12 @@ struct PiSnapshot {
 class ControlEngine
 {
   public:
+    /* After the start a source without a value is "pending" (zones keep
+     * their valves) for its max_age, at least kStartupGraceMs and at most
+     * kPendingMaxMs: MQTT publishers may send only every few minutes. */
     static constexpr uint32_t kStartupGraceMs = 120000;
+    static constexpr uint32_t kPendingMaxMs = 15UL * 60UL * 1000UL;
+    static uint32_t pendingMs(const SourceConfig &s);
     static constexpr float kOutputDeadband = 1.0f; /* % */
     static constexpr float kHeatingThreshold = 1.0f;
     /* a change of the delivered medium must last this long */

@@ -1,6 +1,6 @@
 /*
- * Web page: overview, room setup, settings and maintenance (firmware v2,
- * phase 2b). The full redesign follows in phase 4.
+ * Web page: overview, room setup, settings and maintenance. Mainly for
+ * setting up and diagnosing; daily use is meant to happen in Home Assistant.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
@@ -26,10 +26,15 @@ main{padding:16px;max-width:1300px;margin:0 auto}.tab{display:none;gap:16px}.tab
 section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto}
 table{border-collapse:collapse;width:100%}td,th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
 th{color:var(--mut);font-weight:500}.num{text-align:right;font-variant-numeric:tabular-nums}
-.pill{padding:2px 8px;border-radius:10px;border:1px solid var(--line)}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.pill{padding:2px 8px;border-radius:10px;border:1px solid var(--line)}.pill.ok{border-color:var(--ok)}.pill.bad{border-color:var(--bad)}.pill.warn{border-color:var(--warn)}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
 input[type=number]{width:70px}input,button,select{font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--fg)}
 input.w{width:220px}input.s{width:110px}input.n{width:170px}
-ul.help{margin:0 0 8px;padding-left:18px;color:var(--mut)}ul.help li{margin:2px 0}
+p.intro{margin:0 0 8px;color:var(--mut)}
+details.help{margin:4px 0 8px;color:var(--mut)}details.help summary{cursor:pointer;color:var(--acc)}
+details.help ul{margin:4px 0;padding-left:18px}details.help li{margin:3px 0}
+details.exp{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}details.exp>summary{cursor:pointer;font-weight:600}
+th[title]{cursor:help;text-decoration:underline dotted;text-underline-offset:3px}
+.fld{display:flex;flex-direction:column;gap:1px;padding:3px 0}.fld small.hint{color:var(--mut);font-size:12px}
 .tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:160px;max-width:300px}
 .tag{border:1px solid var(--line);border-radius:10px;padding:1px 4px 1px 8px;white-space:nowrap}
 .tag b{cursor:pointer;padding:0 4px;color:var(--mut)}.tag b:hover{color:var(--bad)}.tags select{padding:1px 4px}
@@ -37,84 +42,99 @@ button{cursor:pointer}button.p{background:var(--acc);color:#fff;border-color:var
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}.mut{color:var(--mut)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 16px}
 label{display:flex;justify-content:space-between;align-items:center;gap:8px}progress{width:200px}
+@media(max-width:700px){main{padding:8px}section{padding:8px}header{padding:8px}td,th{padding:3px 4px}.grid{grid-template-columns:1fr}}
 .chg input{border-color:var(--warn)}small.def{color:var(--warn);font-size:12px}
 #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:6px;display:none;max-width:90vw;z-index:9}
 </style></head><body>
 <div id="toast"></div>
 <header><h1 id="title">VdMot Controller</h1>
-<span id="link" class="pill">…</span><span id="ver" class="mut"></span><span id="net" class="mut"></span>
+<span id="link" class="pill">…</span><span id="netp" class="pill"></span><span id="mqttp" class="pill" style="display:none"></span>
+<span id="fsp" class="pill bad" style="display:none" title="the STM32 moved the valves to the failsafe position (no ESP32 commands)">FAILSAFE</span>
+<span id="ver" class="mut"></span><span id="net" class="mut"></span>
 <span id="err" class="bad"></span></header>
 <nav id="nav"><a href="#ov">Overview</a><a href="#rooms">Rooms &amp; valves</a><a href="#set">Settings</a><a href="#sys">System</a></nav>
 <main>
 <div class="tab" id="tab-ov">
-<section><h2>Zones</h2><table><thead><tr><th>Zone</th><th class="num">Temperature °C</th><th class="num">Supply °C</th><th>Heat setpoint °C</th><th>Cool setpoint °C</th><th>On</th><th>Mode</th>
-<th class="num">Output %</th><th>State</th></tr></thead><tbody id="zones"></tbody></table>
+<section><h2>Zones</h2><table><thead><tr><th title="below the name: the sources of the control temperature">Zone</th><th class="num" title="control temperature: mean of the valid control sources">Temperature °C</th>
+<th class="num" title="decides whether heat or cold is supplied">Supply °C</th><th title="used while heat is supplied (bold = in use)">Heat setpoint °C</th><th title="used while cold is supplied (bold = in use)">Cool setpoint °C</th>
+<th title="off: the valves go to their minimum opening">On</th><th title="control: the ESP32 sets the valves; manual: they are set by hand or by Home Assistant">Mode</th>
+<th class="num" title="controller output before factor and limits">Output %</th><th>State</th></tr></thead><tbody id="zones"></tbody></table>
 <div class="row mut" id="nozones">No zones yet – create them under “Rooms &amp; valves”.</div>
 <div class="row" id="flow"></div></section>
 <section><h2>Valves</h2>
-<div class="row"><button onclick="act('calibrate','all')">Calibrate all</button>
-<button onclick="act('detect','all')">Detect all</button><button onclick="act('stop','all')">Stop all</button></div>
-<table><thead><tr><th>#</th><th>Name</th><th>Zone</th><th>State</th><th class="num">Actual %</th><th class="num">Target %</th>
-<th class="num" title="requested by controller or command → sent after limits and flow guard">Requested → effective %</th>
-<th>Set</th><th class="num">mA</th><th>Flags</th><th class="num">Strokes open/close</th><th class="num">Moves</th><th></th></tr></thead>
+<div class="row"><button onclick="calibrate('all')">Calibrate all</button>
+<button onclick="act('detect','all')">Detect all</button><button onclick="act('stop','all')">Stop all</button>
+<label style="gap:4px"><input type=checkbox id=showdis onchange="refresh()"> show disabled channels <span id=ndis class=mut></span></label></div>
+<table><thead><tr><th>#</th><th>Name</th><th>Zone</th><th>State</th><th class="num" title="position reported by the STM32">Actual %</th><th class="num" title="target on the STM32">Target %</th>
+<th class="num" title="requested by the controller or a command → sent after min/max and the flow guard">Requested → effective %</th>
+<th title="only for valves without a zone or in a zone in mode manual">Set</th><th class="num" title="motor current while moving">mA</th>
+<th title="cal = calibrated, end = at an endstop, pos? = position not known yet, failsafe = failsafe target">Flags</th>
+<th class="num" title="pulses for a full opening / closing stroke (learned by the calibration)">Strokes open/close</th><th class="num">Moves</th><th></th></tr></thead>
 <tbody id="valves"></tbody></table></section>
 </div>
 
 <div class="tab" id="tab-rooms">
 <section><h2>Zones</h2>
-<ul class="help"><li>A zone is a room or heating circuit with one controller; the valves are assigned below.</li>
-<li>Mode <i>control</i>: the ESP32 controls the valves from the temperature. <i>manual</i>: the valve positions are set from outside (web, Home Assistant).</li>
-<li>Control temperature: one or more sources; with several, the mean of the valid ones is used. Further temperatures are only shown with the zone (e.g. return temperatures).</li>
-<li>Profiles: floor (Xp 2 K, Ti 3600 s, sample 300 s), radiator (Xp 1.5 K, Ti 900 s, sample 60 s), custom.</li>
-<li>Heat / cool setpoint: target temperature while the water delivers heat or cold (see Settings → Heating / cooling). On: off closes the valves to their minimum opening.</li>
-<li>Supply temperature: the supply sensor of this zone (e.g. its distributor); empty = the global one.</li>
-<li>Fallback: valve position while no control temperature is valid (empty = global setting).</li></ul>
-<table><thead><tr><th>Name</th><th>Mode</th><th>Heat °C</th><th>Cool °C</th><th>On</th><th>Control temperature</th><th>Further temperatures</th><th>Profile</th>
-<th>Supply temperature</th><th>Xp K</th><th>Ti s</th><th>Sample s</th><th>Fallback %</th><th></th></tr></thead><tbody id="ezones"></tbody></table>
+<p class="intro">A zone is a room or heating circuit with one controller; its valves are assigned under Valves below. Hover over a column title for an explanation.</p>
+<details class="help"><summary>Help</summary><ul>
+<li><b>Mode</b> control: the ESP32 sets the valves from the temperature. manual: the valve positions are set by hand or by Home Assistant (climate off).</li>
+<li><b>Heat / Cool</b>: target temperature while the water supplies heat or cold (Settings → Heating / cooling decides which). <b>On</b> unchecked: the valves go to their minimum opening.</li>
+<li><b>Control temperature</b>: one or more sources; the mean of the valid ones is used. <b>Further temperatures</b> are only shown with the zone, e.g. return temperatures.</li>
+<li><b>Profile</b>: floor (Xp 2 K, Ti 3600 s, sample 300 s) for slow floor heating, radiator (Xp 1.5 K, Ti 900 s, sample 60 s), or custom values.</li>
+<li><b>Xp</b> (proportional band): the temperature difference that changes the output by 100 %. Smaller = stronger reaction. <b>Ti</b> (integral time): how fast a remaining difference is corrected; 0 = off. <b>Sample</b>: how often the controller computes a new output.</li>
+<li><b>Supply temperature</b>: the supply sensor of this zone, e.g. its distributor; empty = the global one. <b>Fallback</b>: valve position while no control temperature is valid; empty = global.</li></ul></details>
+<table><thead><tr><th>Name</th><th title="control: the ESP32 sets the valves; manual: set by hand or by Home Assistant">Mode</th><th title="setpoint while heat is supplied">Heat °C</th><th title="setpoint while cold is supplied">Cool °C</th>
+<th title="off: the valves go to their minimum opening">On</th><th title="the mean of the valid sources is used">Control temperature</th><th title="only shown, e.g. return temperatures">Further temperatures</th>
+<th title="controller parameters: floor, radiator or custom">Profile</th><th title="empty = the global supply sensor">Supply temperature</th>
+<th title="proportional band: temperature difference for 100 % output">Xp K</th><th title="integral time, 0 = off">Ti s</th><th title="how often a new output is computed">Sample s</th>
+<th title="valve position while no control temperature is valid; empty = global">Fallback %</th><th></th></tr></thead><tbody id="ezones"></tbody></table>
 <div class="row"><button onclick="addZone()">Add zone</button><button class="p" onclick="saveZones()">Save zones</button></div></section>
 <section><h2>Valves</h2>
-<ul class="help"><li>Enabled: channels without a valve can be switched off; the STM32 then neither detects nor moves them.</li>
-<li>Without a zone a valve is set directly (overview).</li>
-<li>Min/max limit every target; min is the minimum opening, also with heating off.</li>
-<li>Short name (HA): appended to the valve entities in Home Assistant, e.g. "front" → "VdMot Office Position front". Empty: nothing if the valve is the only one of its zone ("VdMot Office Position"), otherwise the name.</li>
-<li>Factor scales the zone output (simple hydraulic balancing between the circuits of a zone).</li>
-<li>Flow priority: valves opened first to reach the minimum total opening (Settings).</li></ul>
-<table><thead><tr><th>#</th><th>Enabled</th><th>Name</th><th>Short name (HA)</th><th>Zone</th><th>Min %</th><th>Max %</th><th>Factor %</th><th>Flow priority</th></tr></thead><tbody id="evalves"></tbody></table>
+<p class="intro">One row per motor output. Valves without a zone are set directly in the overview.</p>
+<details class="help"><summary>Help</summary><ul>
+<li><b>Enabled</b>: switch off outputs without a valve; the STM32 then neither detects nor moves them, and Home Assistant gets no entities for them.</li>
+<li><b>Short name (HA)</b>: appended to the valve entities in Home Assistant, e.g. "front" → "VdMot Office Valve position front". Empty: nothing if the valve is the only one of its zone, otherwise the name.</li>
+<li><b>Min / Max</b> limit every target; min is the minimum opening, also with the zone off. <b>Factor</b> scales the zone output (simple hydraulic balancing between the circuits of a zone).</li>
+<li><b>Flow priority</b>: these valves are opened first to reach the minimum total opening (Settings → Flow guard).</li></ul></details>
+<table><thead><tr><th>#</th><th title="off: the STM32 ignores this output">Enabled</th><th>Name</th><th title="name suffix in Home Assistant">Short name (HA)</th><th>Zone</th>
+<th title="minimum opening">Min %</th><th title="maximum opening">Max %</th><th title="scales the zone output">Factor %</th><th title="opened first for the minimum total opening">Flow priority</th></tr></thead><tbody id="evalves"></tbody></table>
 <div class="row"><button class="p" onclick="saveValves()">Save valves</button></div></section>
 <section><h2>Temperature sources</h2>
-<ul class="help"><li>1-Wire sensors found on the bus are offered below the table.</li>
-<li>MQTT topic: the topic the value is published on, e.g. by Home Assistant or zigbee2mqtt. Empty = the default topic shown in grey, to which e.g. a Home Assistant automation can publish.</li>
-<li>JSON field: only if the payload is JSON, e.g. <code>{"temperature":21.5,"humidity":40}</code> → <code>temperature</code>; nested fields with a dot (<code>sensor.temp</code>). Empty = the payload is a plain number.</li>
-<li>Short name (HA): optional name in Home Assistant; it puts the device name in front, e.g. short name "Return" on the zone "Office" → "VdMot Office Return". Empty = the name.</li>
-<li>Offset: correction added to the value.</li>
-<li>Max age: after this time without a new value the source counts as stale; zones using it go to their fallback position (0 = never). Publishers that only send on change need a regular resend.</li>
-<li>Home Assistant: import the blueprint <code>blueprints/automation/vdmot/send_temperature.yaml</code> from the repository and create one automation per room with the sensor and the default topic shown below the field.</li></ul>
-<table><thead><tr><th>Name</th><th>Short name (HA)</th><th>Type</th><th>ROM id / MQTT topic</th><th>JSON field</th><th>Offset K</th><th>Max age s</th><th class="num">Value °C</th><th>State</th><th>Used by</th><th></th></tr></thead><tbody id="esources"></tbody></table>
+<p class="intro">Temperatures from 1-Wire sensors (offered below the table when found on the bus) or from MQTT, e.g. Home Assistant.</p>
+<details class="help"><summary>Help</summary><ul>
+<li><b>MQTT topic</b>: the topic the value is published on, e.g. by zigbee2mqtt. Empty = the default topic shown below the field. Home Assistant: import the blueprint <code>blueprints/automation/vdmot/send_temperature.yaml</code> from the repository and create one automation per room with the sensor and this topic.</li>
+<li><b>JSON field</b>: only if the payload is JSON, e.g. <code>{"temperature":21.5,"humidity":40}</code> → <code>temperature</code>; nested fields with a dot (<code>sensor.temp</code>). Empty = the payload is a plain number.</li>
+<li><b>Short name (HA)</b>: optional name in Home Assistant, which puts the device name in front, e.g. "Return" on the zone "Office" → "VdMot Office Return".</li>
+<li><b>Offset</b>: correction added to the value. <b>Max age</b>: after this time without a new value the source counts as stale and zones using only stale sources go to their fallback position (0 = never). Publishers that only send on change need a regular resend (the blueprint does that).</li></ul></details>
+<table><thead><tr><th>Name</th><th title="name in Home Assistant, empty = the name">Short name (HA)</th><th>Type</th><th>ROM id / MQTT topic</th><th title="only for JSON payloads">JSON field</th>
+<th title="added to the value">Offset K</th><th title="stale after this time without a new value; 0 = never">Max age s</th><th class="num">Value °C</th><th>State</th><th>Used by</th><th></th></tr></thead><tbody id="esources"></tbody></table>
 <div class="row"><button onclick="addSource('mqtt')">Add MQTT source</button><button class="p" onclick="saveSources()">Save sources</button></div>
 <div class="row mut" id="unused"></div></section>
 </div>
 
 <div class="tab" id="tab-set">
-<section><h2>Heating / cooling</h2><div class="grid" id="f-hvac"></div>
-<ul class="help"><li>Each zone compares its supply temperature with its room temperature: at least <i>margin</i> above = heat is supplied (heat setpoint), at least <i>margin</i> below = cold is supplied (cool setpoint), in between = nothing is supplied and the controller pauses (valves keep their position, no wind-up). A change must last 5 minutes; once heating or cooling, half the margin is enough to continue.</li>
-<li>Mode auto: from the supply temperature. heat / cool: only this one; the other medium pauses. Without a supply sensor: auto and heat heat, cool cools, never paused.</li></ul>
+<section><h2>Heating / cooling</h2>
+<p class="intro">Each zone compares its supply temperature with its room temperature: clearly above = heat is supplied, clearly below = cold, in between = nothing, and the controller pauses (valves keep their position).</p>
+<div class="grid" id="f-hvac"></div>
 <div class="row"><button class="p" onclick="saveForm('hvac')">Save</button></div></section>
-<section><h2>Flow guard and fallback</h2><div class="grid" id="f-flow"></div>
-<ul class="help"><li>Fallback position: used while a zone has no valid temperature; also written to the STM32 as its failsafe position (ESP32 gone).</li>
-<li>Minimum total opening: minimum sum of all valve positions in percentage points (150 = one and a half open valves, 0 = off). Flow priority valves are opened first; valves with a fault do not count.</li></ul>
+<section><h2>Flow guard and fallback</h2>
+<p class="intro">For heating systems without a buffer tank or bypass: keeps a minimum flow whatever the zones demand.</p>
+<div class="grid" id="f-flow"></div>
 <div class="row"><button class="p" onclick="saveForm('flow')">Save</button></div></section>
 <section><h2>Device</h2><div class="grid" id="f-device"></div>
-<div class="row"><button class="p" onclick="saveForm('device')">Save</button><span class="mut">The name is also the host name. Leave a password empty to keep it.</span></div></section>
+<div class="row"><button class="p" onclick="saveForm('device')">Save</button></div></section>
 <section><h2>Network</h2><div class="grid" id="f-network"></div>
 <div class="row"><button class="p" onclick="saveForm('network')">Save</button><span class="mut">Takes effect after a restart. If no network comes up, the ESP32 opens the access point VdMot-XXXX (password vdmot-setup).</span></div></section>
 <section><h2>MQTT</h2><div class="grid" id="f-mqtt"></div>
-<div class="row"><button class="p" onclick="saveForm('mqtt')">Save</button><span class="mut">With discovery, Home Assistant creates a device for the controller and one per zone.</span></div></section>
+<div class="row"><button class="p" onclick="saveForm('mqtt')">Save</button></div></section>
 <section><h2>STM32 settings</h2>
+<p class="intro">Stored on the STM32, kept over updates. Orange: differs from the default.</p>
 <form id="sys" onsubmit="save('system',this);return false"><div class="grid" id="sysf"></div>
-<div class="row"><button class="p">Save system settings</button><button type="button" onclick="defaults('sysf','sys')">Load defaults</button>
-<span class="mut">Orange: differs from the default. Settings are stored on the STM32 and survive updates. The failsafe position follows the fallback position.</span></div></form>
+<div class="row"><button class="p">Save system settings</button><button type="button" onclick="defaults('sysf','sys')">Load defaults</button></div></form>
+<details class="exp"><summary>Motor parameters (expert)</summary>
+<p class="intro">Endstop and fault detection of the valve motors. The defaults suit the HmIP-VdMot; change them only if valves report false endstops or faults, and one value at a time.</p>
 <form id="mot" onsubmit="save('motor',this);return false"><div class="grid" id="motf"></div>
-<div class="row"><button class="p">Save motor parameters</button><button type="button" onclick="defaults('motf','motor')">Load defaults</button></div></form>
+<div class="row"><button class="p">Save motor parameters</button><button type="button" onclick="defaults('motf','motor')">Load defaults</button></div></form></details>
 </section>
 <section><h2>Configuration backup</h2>
 <div class="row"><a href="/api/config/export"><button>Export configuration</button></a>
@@ -139,7 +159,7 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <div class="grid" id="diag"></div>
 <div class="row">Failsafe test: pause the link for <input type=number id=pause min=0 max=3600 value=360> s
 <button onclick="pauseLink()">Pause link</button><button onclick="pauseLink(0)">Resume</button>
-<span class="mut">The STM32 enters the failsafe after its link timeout (default 300 s; can be lowered in the STM32 settings).</span></div></section>
+</div><p class="intro">The STM32 enters the failsafe after its link timeout (default 300 s; can be lowered in the STM32 settings) and leaves it when the link resumes.</p></section>
 <section><h2>Log</h2><table><tbody id="log"></tbody></table></section>
 </div>
 </main>
@@ -149,19 +169,38 @@ const FAULTS=['','open circuit','blocked','timeout','overcurrent','calibration f
 const KINDS=['','DS18B20 °C','DS2438 VAD V','DS2438 VDD V','DS2438 °C'];
 const SSTAT=['ok','CRC error','unreachable','not measured','out of range'];
 const RESETS=['unknown','power-on','reset pin','software','watchdog','brown-out','low-power'];
-const ACTIONS={off:'off',idle:'idle',heating:'heating',cooling:'cooling',paused:'paused (no heat/cold supplied)',manual:'manual',fallback:'fallback (no temperature)',hold:'waiting for values'};
+const ACTIONS={off:'off',idle:'idle',heating:'heating',cooling:'cooling',paused:'paused (no heat/cold supplied)',manual:'manual',fallback:'fallback (no temperature)',hold:'waiting for temperature values'};
 function dur(s){if(s===undefined)return '?';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'d ':'')+(d||h?h+'h ':'')+m+'min'}
-const SYSF=[['link_timeout_s','Link timeout s (0 = off)'],['failsafe_pos','Failsafe position ‰ (= fallback)'],
-['startup_pos','Startup position ‰ (65535 = last)'],['sensor_interval_s','Sensor interval s'],
-['recal_after_moves','Recalibrate after moves'],['recal_after_days','Recalibrate after days']];
-const MOTF=[['endstop_factor_open','Endstop factor open (x/10)'],['endstop_factor_close','Endstop factor close (x/10)'],
-['endstop_abs_ma','Endstop absolute mA'],['inrush_blank_ms','Inrush blanking ms'],['opencircuit_ma10','Open circuit 0.1 mA'],
-['opencircuit_ms','Open circuit ms'],['move_timeout_s','Move timeout s'],['min_stroke_counts','Min. stroke pulses'],['max_calib_retries','Calibration retries']];
-const FORMS={hvac:[['mode','Mode','sel:auto|heat|cool'],['supply_source','Supply temperature (global)','src'],['supply_margin_k','Margin K','num']],
-flow:[['fallback_pct','Fallback position %','num'],['min_total_pct','Minimum total opening % points (0 = off)','num']],
-device:[['name','Name','text'],['web_user','Web user (empty = no login)','text'],['web_pwd','Web password','pwd'],['tz','Time zone (POSIX)','text'],['ntp','NTP server','text']],
-network:[['mode','Interface','sel:auto|ethernet|wifi'],['dhcp','DHCP','bool'],['ip','IP address','text'],['mask','Subnet mask','text'],['gateway','Gateway','text'],['dns','DNS server','text'],['ssid','WiFi SSID','text'],['wifi_pwd','WiFi password','pwd']],
-mqtt:[['enabled','Enabled','bool'],['host','Broker host','text'],['port','Port','num'],['user','User','text'],['password','Password','pwd'],['client_id','Client id (empty = from MAC)','text'],['base_topic','Base topic (empty = vdmot/<client id>)','text'],['discovery','Home Assistant discovery','bool'],['discovery_prefix','Discovery prefix','text']]};
+/* [key, label, help] */
+const SYSF=[['link_timeout_s','Link timeout s','If the STM32 hears nothing from the ESP32 for this long, it moves all valves to the failsafe position. 0 = never.'],
+['failsafe_pos','Failsafe position ‰','Follows Settings → Fallback position (here in 0.1 %).'],
+['startup_pos','Startup position ‰','Target after an STM32 restart until the ESP32 sends targets. 65535 = the last target.'],
+['sensor_interval_s','1-Wire interval s','How often the 1-Wire sensors are read.'],
+['recal_after_moves','Recalibrate after moves','Automatic recalibration after this many moves. 0 = off.'],
+['recal_after_days','Recalibrate after days','Automatic recalibration after this many days of operation. 0 = off.']];
+const MOTF=[['endstop_factor_open','Endstop factor opening (×0.1)','Endstop when the current exceeds the mean current of the move × factor/10 (17 = 1.7×). Higher: less sensitive (against false endstops of stiff valves); lower: stops earlier.'],
+['endstop_factor_close','Endstop factor closing (×0.1)','As above, while closing.'],
+['endstop_abs_ma','Endstop current limit mA','This current always counts as endstop (safety limit).'],
+['inrush_blank_ms','Inrush blanking ms','The current peak when the motor starts is ignored for this time.'],
+['opencircuit_ma10','Open circuit threshold (0.1 mA)','Below this current no motor is assumed …'],
+['opencircuit_ms','Open circuit time ms','… if it lasts this long without interruption.'],
+['move_timeout_s','Move timeout s','Longest single move; then the fault "timeout".'],
+['min_stroke_counts','Minimum stroke pulses','A calibration with fewer pulses fails (HmIP-VdMot: about 3100–4400).'],
+['max_calib_retries','Calibration retries','Retries after a failed calibration.']];
+/* [key, label, type, help] */
+const FORMS={hvac:[['mode','Mode','sel:auto|heat|cool','auto: heat or cool from the supply temperature. heat / cool: only this one, the other pauses (e.g. set by Home Assistant from the heat pump).'],
+['supply_source','Supply temperature','src','Default for all zones; a zone can use its own (Rooms & valves). Without one, zones never pause.'],
+['supply_margin_k','Margin K','num','Supply at least this far above / below the room = heat / cold. A change must last 5 min; once active, half the margin keeps it.']],
+flow:[['fallback_pct','Fallback position %','num','Valve position while a zone has no valid temperature; also the STM32 failsafe position when the ESP32 is gone.'],
+['min_total_pct','Minimum total opening %','num','Minimum sum of all valve positions in percentage points (150 = 1½ open valves). Flow priority valves are opened first; faulty valves do not count. 0 = off.']],
+device:[['name','Name','text','Also the host name and the device name in Home Assistant.'],['web_user','Web user','text','Empty = no login.'],['web_pwd','Web password','pwd','Leave empty to keep it.'],
+['tz','Time zone','text','POSIX format; Germany: CET-1CEST,M3.5.0,M10.5.0/3'],['ntp','NTP server','text','']],
+network:[['mode','Interface','sel:auto|ethernet|wifi','auto: Ethernet, WiFi if Ethernet does not come up.'],['dhcp','DHCP','bool','Off: the addresses below are used.'],['ip','IP address','text',''],['mask','Subnet mask','text',''],
+['gateway','Gateway','text',''],['dns','DNS server','text',''],['ssid','WiFi SSID','text',''],['wifi_pwd','WiFi password','pwd','Leave empty to keep it.']],
+mqtt:[['enabled','Enabled','bool',''],['host','Broker host','text','Host name or IP address; no TLS.'],['port','Port','num',''],['user','User','text',''],['password','Password','pwd','Leave empty to keep it.'],
+['client_id','Client id','text','Empty = vdmot- plus the end of the MAC address. Home Assistant identifies the device by it: changing it creates new entities.'],
+['base_topic','Base topic','text','Empty = vdmot/<client id>.'],['discovery','Home Assistant discovery','bool','Creates a device for the controller and one per zone in Home Assistant.'],
+['discovery_prefix','Discovery prefix','text','Usually homeassistant.']]};
 let formsDone=false,editing=new Set(),CFG=null,lastState=null;
 const $=id=>document.getElementById(id);
 const pct=v=>v===65535||v===undefined?'?':(v/10).toFixed(1);
@@ -181,6 +220,8 @@ catch(e){j={ok:false,error:c.signal.aborted?'no answer from the ESP32':'ESP32 no
 async function post(path,body){const j=await req(path,{body:new URLSearchParams(body||undefined)});
 if(!j.ok)alert(j.error||'failed');else toast(DONE[path]||'Done');refresh();return j}
 function act(a,ch){const f=new FormData();if(ch!==undefined)f.append('ch',ch);post(a,f)}
+function calibrate(ch){if(confirm(ch==='all'?'Calibrate all enabled valves? Each one runs fully open and closed, one after another (about 2 minutes per valve); calibrated valves wait fully open.'
+:`Calibrate valve ${ch+1}? It runs fully open and closed (about 2 minutes).`))act('calibrate',ch)}
 function defaults(id,kind){const d=lastState&&lastState.defaults&&lastState.defaults[kind];if(!d)return;
 Object.entries(d).forEach(([k,v])=>{const i=$(id).querySelector(`[name=${k}]`);if(i)i.value=v});dirty.add(id);toast('Defaults loaded – click Save to apply')}
 let espUpload=false;
@@ -197,9 +238,9 @@ const x=new XMLHttpRequest();const f=new FormData();f.append('file',fi,fi.name);
 espUpload=kind==='esp';x.upload.onprogress=e=>{$('prog').value=e.loaded*100/e.total;$('upd').textContent='uploading '+kind};
 x.onload=()=>{let j={};try{j=JSON.parse(x.responseText)}catch(e){}$('upd').textContent=j.ok?(kind==='esp'?'ESP32 updated, restarting…':'flashing STM32…'):('error: '+(j.error||x.status))};
 x.open('POST','/api/'+kind+'/firmware');x.send(f)}
-function fill(id,fields,vals,defs){const g=$(id);if(!formsDone)g.innerHTML=fields.map(([k,l])=>`<label data-k=${k}><span>${l} <small class=def></small></span><input type=number name=${k}></label>`).join('');
+function fill(id,fields,vals,defs){const g=$(id);if(!formsDone)g.innerHTML=fields.map(([k,l,h])=>`<div class=fld data-k=${k}><label><span>${esc(l)} <small class=def></small></span><input type=number name=${k}></label><small class=hint>${esc(h)}</small></div>`).join('');
 if(!vals)return;fields.forEach(([k])=>{const lab=g.querySelector(`[data-k=${k}]`);const diff=defs&&vals[k]!==defs[k];
-lab.classList.toggle('chg',!!diff);lab.querySelector('small').textContent=diff?`(default ${defs[k]})`:''});
+lab.classList.toggle('chg',!!diff);lab.querySelector('small.def').textContent=diff?`(default ${defs[k]})`:''});
 if(!dirty.has(id))fields.forEach(([k])=>{g.querySelector(`[name=${k}]`).value=vals[k]})}
 
 /* ---------------- configuration editors ---------------- */
@@ -274,13 +315,13 @@ const isTemp=k=>k===1||k===4;
 function renderUnused(){if(!lastState||!CFG)return;const used=new Set(ED.sources.filter(s=>s.type==='onewire').map(s=>s.rom));
 const un=lastState.sensors.filter(x=>isTemp(x.kind)&&!used.has(x.rom));
 $('unused').innerHTML=un.length?'1-Wire sensors not used yet: '+un.map(x=>`<button onclick="addSource('onewire','${x.rom}')">${x.rom} (${(x.value/1000).toFixed(1)} °C) – add</button>`).join(' '):''}
-function renderForm(sec){const v=CFG[sec];$('f-'+sec).innerHTML=FORMS[sec].map(([k,l,t])=>{let i;
+function renderForm(sec){const v=CFG[sec];$('f-'+sec).innerHTML=FORMS[sec].map(([k,l,t,h])=>{let i;
 if(t==='bool')i=`<input type=checkbox data-k=${k}${v[k]?' checked':''}>`;
 else if(t==='pwd')i=`<input type=password class=s data-k=${k} placeholder="${v[k+'_set']?'unchanged':'not set'}" autocomplete=new-password>`;
 else if(t.startsWith('sel:'))i=`<select data-k=${k}>${t.slice(4).split('|').map(o=>opt(o,o,v[k]===o)).join('')}</select>`;
 else if(t==='src')i=`<select data-k=${k}>${opt('','– none –',!v[k])}${CFG.sources.map(s=>opt(s.id,srcLabel(s),s.id===v[k])).join('')}</select>`;
 else if(t==='num')i=`<input type=number step=any data-k=${k} value="${esc(v[k])}">`;else i=`<input class=s data-k=${k} value="${esc(v[k])}">`;
-return `<label><span>${esc(l)}</span>${i}</label>`}).join('')}
+return `<div class=fld><label><span>${esc(l)}</span>${i}</label>${h?`<small class=hint>${esc(h)}</small>`:''}</div>`}).join('')}
 function saveForm(sec){const o=rowVals($('f-'+sec));FORMS[sec].forEach(([k,,t])=>{if(t==='pwd'&&!o[k])delete o[k]});
 saveSection(sec,o,'Settings saved')}
 async function importCfg(){const fi=$('fimp').files[0];if(!fi){alert('choose a file');return}if(!confirm('Replace the whole configuration and restart?'))return;
@@ -312,7 +353,12 @@ try{render(s)}catch(e){$('err').textContent='page error: '+e.message;console.err
 function render(s){
 const l=s.link;$('link').textContent='STM32 '+l.state+(l.paused_s?` (link paused, ${l.paused_s} s)`:'');$('link').className='pill '+(l.state==='connected'?'ok':'bad');
 $('ver').textContent='ESP32 '+s.esp.version+(s.stm?(' · STM32 '+s.stm.version+' ('+s.stm.mcu+', '+s.stm.hw+') · boot #'+s.stm.boot_count+', last reset: '+(RESETS[s.stm.reset_cause]||s.stm.reset_cause)+', up '+dur(s.diag&&s.diag.stm_uptime_s)):'');
-$('net').textContent=s.net.interface+' '+s.net.ip+(s.net.ap?(' · AP '+s.net.ap_ssid):'')+(s.net.time?' · '+s.net.time:'')+(s.net.mqtt!=='disabled'?' · MQTT '+s.net.mqtt:'');$('err').textContent=s.error||'';
+const n=s.net,np=$('netp'),mq=$('mqttp');
+np.textContent=(n.interface==='none'?'no network':n.interface==='ap'?'setup AP '+n.ap_ssid:n.interface+' '+n.ip)+(n.ap&&n.interface!=='ap'?' · AP '+n.ap_ssid:'');
+np.className='pill '+(n.interface==='ethernet'||n.interface==='wifi'?'ok':n.interface==='ap'?'warn':'bad');
+mq.style.display=n.mqtt==='disabled'?'none':'';mq.textContent='MQTT '+n.mqtt;mq.className='pill '+(n.mqtt==='connected'?'ok':'warn');
+$('fsp').style.display=s.valves.some(v=>v.flags&16)?'':'none';
+$('net').textContent=n.time||'';$('err').textContent=s.error||'';
 $('cfginfo').textContent='Configuration at start: '+s.config;
 renderZoneStatus(s);
 const zname=id=>{const z=s.ctl.zones.find(x=>x.id===id);return z?z.name:''};
@@ -320,14 +366,17 @@ const zname=id=>{const z=s.ctl.zones.find(x=>x.id===id);return z?z.name:''};
  * an input that has the focus is not replaced */
 if($('valves').rows.length!==s.valves.length)$('valves').innerHTML=s.valves.map(v=>`<tr id=vr${v.ch}><td>${v.ch+1}</td><td></td><td></td><td></td><td class=num></td><td class=num></td><td class=num></td>
 <td><input id=t${v.ch} type=number min=0 max=100 step=0.5 oninput="editing.add('t${v.ch}')"><button id=b${v.ch} onclick="setT(${v.ch})">Set</button></td>
-<td class=num></td><td></td><td class=num></td><td class=num></td><td><button onclick="act('calibrate',${v.ch})">Calibrate</button></td></tr>`).join('');
-s.valves.forEach(v=>{const c=$('vr'+v.ch).cells;const cv=s.ctl.valves[v.ch];c[1].textContent=cv.name;c[2].textContent=zname(cv.zone);
+<td class=num></td><td></td><td class=num></td><td class=num></td><td><button onclick="calibrate(${v.ch})">Calibrate</button></td></tr>`).join('');
+const showDis=$('showdis').checked;let nDis=0;
+s.valves.forEach(v=>{const row=$('vr'+v.ch),c=row.cells;const cv=s.ctl.valves[v.ch];
+if(v.mode===0)nDis++;row.style.display=v.mode===0&&!showDis?'none':'';c[1].textContent=cv.name;c[2].textContent=zname(cv.zone);
 c[3].className=v.mode===8?'bad':(v.mode===2||v.mode===0?'mut':'');
 c[3].textContent=(MODES[v.mode]||v.mode)+(v.fault?' – '+FAULTS[v.fault]:'');c[4].textContent=pct(v.actual);c[5].textContent=pct(v.target);
 c[6].textContent=cv.effective===undefined?'–':(cv.requested!==cv.effective?pct(cv.requested)+' → ':'')+pct(cv.effective);
 const i=$('t'+v.ch);if(!editing.has('t'+v.ch)&&document.activeElement!==i)i.value=(cv.effective??v.target)/10;
 i.disabled=$('b'+v.ch).disabled=cv.controlled;i.title=cv.controlled?'set by the zone controller':'';
 c[8].textContent=(v.current/10).toFixed(1);c[9].textContent=flags(v.flags);c[10].textContent=(v.open_counts??'')+'/'+(v.close_counts??'');c[11].textContent=v.moves??''});
+$('ndis').textContent=nDis?`(${nDis})`:'';
 const srcByRom={};if(CFG)CFG.sources.forEach(x=>{if(x.type==='onewire')srcByRom[x.rom]=x.name});
 $('sensors').innerHTML=s.sensors.map(x=>{const t=x.kind===2||x.kind===3;return `<tr><td>${x.rom}</td><td>${KINDS[x.kind]||x.kind}</td>
 <td class=num>${x.age===65535?'':(x.value/1000).toFixed(t?3:2)}</td><td class="${x.status?'warn':''}">${SSTAT[x.status]||x.status}</td><td class=num>${x.age===65535?'':x.age}</td>
@@ -346,7 +395,13 @@ if(ask)$('upd').textContent='Press the RESET button on the STM32 (BlackPill) now
 const e=s.esp;if(e.heap_size){const used=100-e.heap*100/e.heap_size,peak=100-e.heap_min*100/e.heap_size;$('heapbar').value=used;
 $('heaptxt').textContent=`${used.toFixed(0)} % (${(e.heap/1024).toFixed(0)} of ${(e.heap_size/1024).toFixed(0)} kB free) · peak ${peak.toFixed(0)} % · largest free block ${(e.heap_block/1024).toFixed(0)} kB`}
 const d=Object.assign({},s.link.stats,s.diag||{});$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
-$('log').innerHTML=s.log.slice().sort((a,b)=>b.ms-a.ms).map(e=>`<tr><td class=mut>${(e.ms/1000).toFixed(0)} s</td><td>${e.src==='esp'?'ESP32':'STM32'}</td><td>${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
+lastUptime=s.esp.uptime_s;if(location.hash==='#sys')loadLog()}
+/* the log has its own request, only while the System tab is open */
+let lastUptime=0;
+async function loadLog(){let l;try{const r=await fetch('/api/log');if(!r.ok)return;l=await r.json()}catch(e){return}
+/* log times: ESP32 milliseconds since start → clock time of the browser */
+const t0=Date.now()-lastUptime*1000;
+$('log').innerHTML=l.sort((a,b)=>b.ms-a.ms).map(e=>`<tr><td class=mut>${new Date(t0+e.ms).toLocaleTimeString()}</td><td>${e.src==='esp'?'ESP32':'STM32'}</td><td class="${['bad','warn','',''][e.level]}">${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
 loadCfg().then(refresh);setInterval(refresh,2000);
 </script></body></html>)HTML";
 

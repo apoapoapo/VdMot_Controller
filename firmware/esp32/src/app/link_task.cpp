@@ -148,6 +148,7 @@ void flashStm32()
              chip);
     strlcpy(s.detail, detail, sizeof(s.detail));
     setUpdateStatus(s);
+    espLog(r == vdm::FlashResult::Ok ? VDM_LOG_INFO : VDM_LOG_ERROR, "STM32 update: %s", s.result);
 
     uart.begin(115200, SERIAL_8N1, kPinStmRx, kPinStmTx);
     client->resume(millis());
@@ -228,6 +229,7 @@ void linkTask(void *)
         }
         client->tick(millis());
         if (client->takeHardResetRequest()) {
+            espLog(VDM_LOG_WARN, "STM32 does not answer: reset pulse (needs jumper X20)");
             hardReset();
         }
         if (millis() - last_publish >= kPublishMs) {

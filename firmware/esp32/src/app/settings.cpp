@@ -151,7 +151,7 @@ void settingsBegin()
         saveNow();
     }
     updateHostname();
-    Serial.printf("config: %s\n", g_info);
+    espLog(r == vdm::LoadResult::Loaded ? VDM_LOG_INFO : VDM_LOG_WARN, "configuration %s", g_info);
 }
 
 void settingsLoop()
