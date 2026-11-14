@@ -291,8 +291,11 @@ Request: `count` (u8, 1…12), then `count` × { `channel` u8, `target` u16 }.
 |---|---|---|
 | `mask` | u16 | channels to calibrate |
 
-The channels are calibrated one after another (only one motor at a time). The
-response `OK` only means "scheduled". The result arrives per channel as
+The channels are calibrated one after another (only one motor at a time):
+open to the endstop, close to the endstop (closing stroke counted), open to
+the endstop (opening stroke counted). A calibrated valve waits fully open
+until all calibrations are done and then moves to its target, so the
+heating keeps flowing. The response `OK` only means "scheduled". The result arrives per channel as
 `EVT_CALIBRATION`.
 
 #### `0x13 STOP`

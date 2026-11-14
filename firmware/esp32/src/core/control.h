@@ -50,7 +50,8 @@ struct ZoneStatus {
     bool has_output = false; /* false: valves keep their position (start-up) */
     float output = 0.0f;     /* % */
     ZoneAction action = ZoneAction::Hold;
-    Medium medium = Medium::Heat; /* controller in use; None: paused */
+    Medium medium = Medium::Heat;    /* controller in use; None: paused */
+    bool has_control_source = false; /* at least one control source configured */
     bool has_supply = false;
     float supply = 0.0f; /* supply temperature used for the zone */
 };

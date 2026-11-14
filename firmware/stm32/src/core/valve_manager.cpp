@@ -419,7 +419,7 @@ bool ValveManager::setupJob(uint8_t ch, Job job)
     case Job::Calibrate:
         c.calib_retries = 0;
         cal_phase_ = CalPhase::Home;
-        job_dir_ = Dir::Close;
+        job_dir_ = Dir::Open;
         run_target_pulses_ = 0;
         break;
     case Job::Reference:
@@ -765,7 +765,7 @@ bool ValveManager::calibrationFailed(uint8_t fault, uint32_t now_ms)
     if (c.calib_retries < motor_params_.max_calib_retries) {
         c.calib_retries++;
         cal_phase_ = CalPhase::Home;
-        job_dir_ = Dir::Close;
+        job_dir_ = Dir::Open;
         run_target_pulses_ = 0;
         return true;
     }
@@ -798,31 +798,31 @@ bool ValveManager::finishCalibrationStep(const RunResult &r, uint32_t now_ms)
 
     switch (cal_phase_) {
     case CalPhase::Home:
-        cal_phase_ = CalPhase::Open;
-        job_dir_ = Dir::Open;
-        return true;
-
-    case CalPhase::Open:
-        cal_open_counts_ = r.pulses;
-        cal_open_mean_ = r.mean_ma10;
         cal_phase_ = CalPhase::Close;
         job_dir_ = Dir::Close;
         return true;
 
     case CalPhase::Close:
+        cal_close_counts_ = r.pulses;
+        cal_close_mean_ = r.mean_ma10;
+        cal_phase_ = CalPhase::Open;
+        job_dir_ = Dir::Open;
+        return true;
+
+    case CalPhase::Open:
         break;
     }
 
-    uint32_t close_counts = r.pulses;
-    if (cal_open_counts_ < motor_params_.min_stroke_counts ||
-        close_counts < motor_params_.min_stroke_counts) {
+    uint32_t open_counts = r.pulses;
+    if (open_counts < motor_params_.min_stroke_counts ||
+        cal_close_counts_ < motor_params_.min_stroke_counts) {
         return calibrationFailed(VDM_FAULT_CALIB_FAILED, now_ms);
     }
 
-    c.p.open_counts = cal_open_counts_;
-    c.p.close_counts = close_counts;
-    c.p.mean_open_ma10 = cal_open_mean_;
-    c.p.mean_close_ma10 = r.mean_ma10;
+    c.p.open_counts = open_counts;
+    c.p.close_counts = cal_close_counts_;
+    c.p.mean_open_ma10 = r.mean_ma10;
+    c.p.mean_close_ma10 = cal_close_mean_;
     c.p.calibrated = 1;
     c.p.calib_op_hours = op_hours_;
     c.p.moves_since_calib = 0;
@@ -832,7 +832,7 @@ bool ValveManager::finishCalibrationStep(const RunResult &r, uint32_t now_ms)
     c.want_reference = false;
     c.blocked_cnt = 0;
     c.pos_known = true;
-    c.pos_ppm = 0;
+    c.pos_ppm = kFull; /* ends at the open endstop */
     c.at_endstop = true;
     persist_dirty_ |= static_cast<uint16_t>(1u << job_ch_);
     persist_urgent_ |= static_cast<uint16_t>(1u << job_ch_);

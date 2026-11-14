@@ -427,6 +427,17 @@ void ControlEngine::evalZone(uint8_t i, uint32_t now_ms)
                 : stale   ? SourceState::Stale
                           : SourceState::Missing;
     st.has_temperature = n_any > 0;
+    st.has_control_source = false;
+    for (const auto &id : zc.control_sources) {
+        st.has_control_source = st.has_control_source || id[0] != '\0';
+    }
+    {
+        /* supply temperature, shown in every state */
+        const char *sid = zc.supply_source[0] != '\0' ? zc.supply_source : cfg_->hvac.supply_source;
+        const SourceStatus *sup = sid[0] != '\0' ? sourceById(sid) : nullptr;
+        st.has_supply = sup != nullptr && sup->has_value;
+        st.supply = st.has_supply ? sup->value : 0.0f;
+    }
     st.temperature = n_ok > 0    ? sum_ok / static_cast<float>(n_ok)
                      : n_any > 0 ? sum_any / static_cast<float>(n_any)
                                  : 0.0f;

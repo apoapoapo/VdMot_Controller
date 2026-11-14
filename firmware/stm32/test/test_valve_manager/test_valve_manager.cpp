@@ -56,6 +56,29 @@ static void test_boot_detect_calibrate_and_move(void)
     TEST_ASSERT_FALSE(r.board.psu && r.board.enabled >= 0);
 }
 
+static void test_calibration_ends_open_while_others_calibrate(void)
+{
+    Rig r(0x0003);
+    r.vm.setTarget(0, 200);
+    r.vm.setTarget(1, 200);
+    vdm_evt_calibration_t evt;
+    bool first = false;
+    for (uint32_t k = 0; k < 30u * 60u * 1000u && !first; k++) {
+        r.step();
+        first = r.vm.popCalibrationEvent(evt);
+    }
+    TEST_ASSERT_TRUE(first);
+    uint8_t done = evt.channel, other = (uint8_t)(1u - evt.channel);
+    /* the calibrated valve waits fully open while the other one calibrates */
+    r.runMs(5000);
+    TEST_ASSERT_EQUAL_UINT8(VDM_MODE_CALIBRATING, st(r, other).mode);
+    TEST_ASSERT_EQUAL_UINT16(1000, st(r, done).actual);
+    assertPositionMatches(r, done, 6);
+    TEST_ASSERT_TRUE(r.settle());
+    TEST_ASSERT_UINT16_WITHIN(6, 200, st(r, 0).actual);
+    TEST_ASSERT_UINT16_WITHIN(6, 200, st(r, 1).actual);
+}
+
 static void test_valve_fully_open_at_boot(void)
 {
     Rig r;
@@ -370,6 +393,7 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_boot_detect_calibrate_and_move);
+    RUN_TEST(test_calibration_ends_open_while_others_calibrate);
     RUN_TEST(test_valve_fully_open_at_boot);
     RUN_TEST(test_random_moves_do_not_drift);
     RUN_TEST(test_endpoints_run_into_endstop);

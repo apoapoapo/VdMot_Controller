@@ -644,6 +644,19 @@ void test_zone_supply_source_overrides()
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.0f, eng->zone(1).supply);
 }
 
+void test_supply_shown_without_room_temperature()
+{
+    start(kHvac);
+    cfg.zones[0].control_sources[0][0] = '\0';
+    mqtt("supply", "33");
+    run(ControlEngine::kStartupGraceMs + 1000);
+    TEST_ASSERT_EQUAL(ZoneAction::Fallback, eng->zone(0).action);
+    TEST_ASSERT_FALSE(eng->zone(0).has_control_source);
+    TEST_ASSERT_TRUE(eng->zone(0).has_supply);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 33.0f, eng->zone(0).supply);
+    TEST_ASSERT_TRUE(eng->zone(1).has_control_source);
+}
+
 int main()
 {
     UNITY_BEGIN();
@@ -672,5 +685,6 @@ int main()
     RUN_TEST(test_cooling_and_mixed_zones);
     RUN_TEST(test_forced_mode);
     RUN_TEST(test_zone_supply_source_overrides);
+    RUN_TEST(test_supply_shown_without_room_temperature);
     return UNITY_END();
 }

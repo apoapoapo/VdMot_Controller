@@ -217,6 +217,7 @@ void putControl(JsonObject o)
         zo["setpoint"] = zc.setpoint;
         zo["cool_setpoint"] = zc.cool_setpoint;
         zo["medium"] = vdm::mediumName(z.medium);
+        zo["has_source"] = z.has_control_source;
         if (z.has_supply) {
             zo["supply"] = roundf(z.supply * 10.0f) / 10.0f;
         }

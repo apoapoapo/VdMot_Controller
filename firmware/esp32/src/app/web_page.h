@@ -300,7 +300,7 @@ if(!editing.has('cp'+z.id)&&document.activeElement!==cp)cp.value=z.cool_setpoint
 $('ht'+z.id).checked=z.enabled;if(document.activeElement!==$('md'+z.id))$('md'+z.id).value=z.mode;
 sp.disabled=cp.disabled=z.mode!=='control';sp.style.fontWeight=z.medium==='heat'?'700':'';cp.style.fontWeight=z.medium==='cool'?'700':'';
 c[7].textContent=z.output===undefined?'–':z.output.toFixed(1);
-c[8].textContent=ACTIONS[z.action]||z.action;c[8].className=z.action==='fallback'?'warn':(z.action==='heating'||z.action==='cooling'?'ok':'mut')});
+c[8].textContent=z.action==='fallback'&&!z.has_source?'fallback – no control temperature assigned (Rooms & valves)':(ACTIONS[z.action]||z.action);c[8].className=z.action==='fallback'?'warn':(z.action==='heating'||z.action==='cooling'?'ok':'mut')});
 const f=s.ctl.flow;$('flow').innerHTML=f.min_total?`Flow guard: total ${pct(f.total)} % of at least ${pct(f.min_total)} %`+
 (f.active?` – <b class=warn>active, +${pct(f.added)} % added</b>`:' – not needed')+(f.insufficient?' – <b class=bad>minimum cannot be reached</b>':''):'<span class=mut>Flow guard off (minimum total opening 0)</span>'}
 async function refresh(){let s;try{const r=await fetch('/api/state');s=await r.json();if(!r.ok)throw new Error(s.error||'HTTP '+r.status)}
