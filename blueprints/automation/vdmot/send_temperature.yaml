@@ -1,0 +1,56 @@
+# Home Assistant blueprint: send a temperature to a VdMot Controller.
+#
+# Import: Settings → Automations & scenes → Blueprints → Import blueprint,
+# with the URL of this file on GitHub. Then create one automation per
+# room: choose the temperature sensor and paste the topic of the VdMot
+# temperature source (Rooms & valves → Temperature sources).
+#
+# SPDX-License-Identifier: GPL-3.0-only
+blueprint:
+  name: VdMot – send a temperature
+  description: >-
+    Sends the value of a Home Assistant temperature sensor to a temperature
+    source of a VdMot Controller via MQTT, on every change and every 5
+    minutes (so the source does not become stale when the temperature does
+    not change). Values like "unavailable" are not sent.
+  domain: automation
+  source_url: https://github.com/apoapoapo/VdMot_Controller/blob/master/blueprints/automation/vdmot/send_temperature.yaml
+  input:
+    sensor:
+      name: Temperature sensor
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+    topic:
+      name: MQTT topic of the VdMot source
+      description: >-
+        Shown in the VdMot web page under Rooms & valves → Temperature
+        sources, e.g. vdmot/vdmot-a1b2c3/source/s8/set
+      selector:
+        text: {}
+
+mode: queued
+max_exceeded: silent
+
+variables:
+  sensor_entity: !input sensor
+
+trigger:
+  - platform: state
+    entity_id: !input sensor
+  - platform: homeassistant
+    event: start
+  - platform: time_pattern
+    minutes: "/5"
+
+condition:
+  - condition: template
+    value_template: "{{ states(sensor_entity) | is_number }}"
+
+action:
+  - service: mqtt.publish
+    data:
+      topic: !input topic
+      payload: "{{ states(sensor_entity) }}"

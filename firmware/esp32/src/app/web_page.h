@@ -86,7 +86,7 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <li>JSON field: only if the payload is JSON, e.g. <code>{"temperature":21.5,"humidity":40}</code> → <code>temperature</code>; nested fields with a dot (<code>sensor.temp</code>). Empty = the payload is a plain number.</li>
 <li>Offset: correction added to the value.</li>
 <li>Max age: after this time without a new value the source counts as stale; zones using it go to their fallback position (0 = never). Publishers that only send on change need a regular resend.</li>
-<li>Home Assistant: an automation can publish a sensor to the default topic (see the design document), or use the topic of zigbee2mqtt etc. directly.</li></ul>
+<li>Home Assistant: import the blueprint <code>blueprints/automation/vdmot/send_temperature.yaml</code> from the repository and create one automation per room with the sensor and the default topic shown below the field.</li></ul>
 <table><thead><tr><th>Name</th><th>Type</th><th>ROM id / MQTT topic</th><th>JSON field</th><th>Offset K</th><th>Max age s</th><th class="num">Value °C</th><th>State</th><th>Used by</th><th></th></tr></thead><tbody id="esources"></tbody></table>
 <div class="row"><button onclick="addSource('mqtt')">Add MQTT source</button><button class="p" onclick="saveSources()">Save sources</button></div>
 <div class="row mut" id="unused"></div></section>
@@ -106,7 +106,7 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <section><h2>Network</h2><div class="grid" id="f-network"></div>
 <div class="row"><button class="p" onclick="saveForm('network')">Save</button><span class="mut">Takes effect after a restart. If no network comes up, the ESP32 opens the access point VdMot-XXXX (password vdmot-setup).</span></div></section>
 <section><h2>MQTT</h2><div class="grid" id="f-mqtt"></div>
-<div class="row"><button class="p" onclick="saveForm('mqtt')">Save</button><span class="mut">Home Assistant discovery follows in the next firmware step.</span></div></section>
+<div class="row"><button class="p" onclick="saveForm('mqtt')">Save</button><span class="mut">With discovery, Home Assistant creates a device for the controller and one per zone.</span></div></section>
 <section><h2>STM32 settings</h2>
 <form id="sys" onsubmit="save('system',this);return false"><div class="grid" id="sysf"></div>
 <div class="row"><button class="p">Save system settings</button><button type="button" onclick="defaults('sysf','sys')">Load defaults</button>
@@ -257,7 +257,7 @@ if(want.some((w,i)=>w!==now[i])){const f=new FormData();want.forEach((w,i)=>{if(
 saveSection('valves',rows.map(rowVals),'Valves saved')}
 function renderSources(){$('esources').innerHTML=ED.sources.map((s,i)=>{const m=s.type==='mqtt';return `<tr data-i=${i}>
 <td><input class=n data-k=name value="${esc(s.name)}"></td><td>${m?'MQTT':'1-Wire'}</td>
-<td>${m?`<input class=w data-k=topic value="${esc(s.topic)}" placeholder="${esc((CFG.mqtt_base||'vdmot/…')+'/source/'+(s.id||'<id>')+'/set')}">`:esc(s.rom)}</td>
+<td>${m?`<input class=w data-k=topic value="${esc(s.topic)}" placeholder="default topic">${s.id&&!s.topic?`<div class=mut style="font-size:12px;user-select:all">${esc((CFG.mqtt_base||'vdmot/…')+'/source/'+s.id+'/set')}</div>`:''}`:esc(s.rom)}</td>
 <td>${m?`<input class=s data-k=field value="${esc(s.field)}" placeholder="plain number">`:''}</td>
 <td><input type=number data-k=offset min=-10 max=10 step=0.1 value=${s.offset}></td>
 <td><input type=number data-k=max_age_s min=0 value=${s.max_age_s}></td>

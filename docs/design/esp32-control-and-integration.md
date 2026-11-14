@@ -1,6 +1,6 @@
 # ESP32: configuration, room control and Home Assistant integration
 
-Status: **accepted**, phase 2b implemented, phase 3 open · Phases 2b and 3 of [`../refactoring/PLAN.md`](../refactoring/PLAN.md)
+Status: **accepted**, phases 2b and 3 implemented · Phases 2b and 3 of [`../refactoring/PLAN.md`](../refactoring/PLAN.md)
 
 This document defines what the ESP32 firmware v2 stores, how rooms are
 controlled, how a minimum flow through the heating circuits is guaranteed
@@ -295,81 +295,62 @@ not reachable does not block the web page or the control.
 
 ### 7.1 Temperatures from Home Assistant
 
-Create an MQTT source per room (topic empty), note its id (`s8`, …) and
-let an automation publish the HA sensors to the default topics, on every
-change and every 5 minutes (so `max_age_s` can stay at its default):
-
-```yaml
-automation:
-  - alias: VdMot room temperatures
-    mode: queued
-    trigger:
-      - platform: state
-        entity_id:
-          - sensor.office_temperature
-          - sensor.bedroom_temperature
-      - platform: time_pattern
-        minutes: "/5"
-    action:
-      - repeat:
-          for_each:
-            - { source: s8, entity: sensor.office_temperature }
-            - { source: s9, entity: sensor.bedroom_temperature }
-          sequence:
-            - service: mqtt.publish
-              data:
-                topic: "vdmot/vdmot-a1b2c3/source/{{ repeat.item.source }}/set"
-                payload: "{{ states(repeat.item.entity) }}"
-```
-
-The base topic is shown under Settings → MQTT and in the placeholder of the
-topic field.
+Create an MQTT source per room with an empty topic; the web page shows its
+default topic (`<base>/source/<sid>/set`) below the field. In Home
+Assistant import the blueprint
+[`blueprints/automation/vdmot/send_temperature.yaml`](../../blueprints/automation/vdmot/send_temperature.yaml)
+and create one automation per room: choose the sensor, paste the topic.
+It publishes on every change, at the start of Home Assistant and every 5
+minutes, so `max_age_s` can stay at its default; non-numeric states are
+not sent.
 
 ## 8. Home Assistant (discovery)
 
-**Devices:**
-- one **controller** device,
-- one device **per zone**, linked to the controller (`via_device`) so it
-  can be assigned to an area/room in HA.
+Discovery messages are retained, sent step by step after connecting, after
+every configuration change and when Home Assistant announces
+`<prefix>/status = online`. Entities of zones or sources removed while the
+ESP32 runs are deleted; the `unique_id`s are `<client id>_<object>`, e.g.
+`vdmot-a1b2c3_z1_climate`, so renaming never creates new entities.
 
-**Entities per zone:**
+**Availability:** `<base>/status` **and** `<base>/link` (mode `all`); the
+climate additionally `<base>/zone/<zid>/climate`.
 
-| Entity | When | Content |
-|---|---|---|
-| `climate` | always; **unavailable in mode `manual`** | target temperature, current temperature, `hvac_mode` heat/off, `hvac_action` heating/idle/off |
-| `sensor` (temperature) | always | the zone's control temperature, also in mode `manual` |
-| `select` | always | mode `control`/`manual` |
-| `valve` (one per valve) | always | position; commandable in `manual` mode |
-| `sensor` | per info source | e.g. "Bathroom return" |
-| `binary_sensor` (problem) | always | stale temperature, valve fault |
-| diagnostics | always | per valve current, stroke, moves, fault text; "Calibrate" button (disabled by default) |
+**Controller device** (`<client id>`, with firmware version and a link to
+the web page):
 
-**Entities of the controller:**
-- STM32 link (connectivity), failsafe active, flow guard active,
-- firmware versions, IP address,
-- restart buttons,
-- temperature sources without a zone (e.g. supply).
+| Entity | Content |
+|---|---|
+| `binary_sensor` STM32 link | connectivity (only needs the ESP32) |
+| `binary_sensor` Failsafe | problem |
+| `binary_sensor` Flow guard active | |
+| `select` Heating / cooling | `auto` / `heat` / `cool` (`hvac.mode`, command `<base>/set`) |
+| `sensor` Total valve opening | % (diagnostic) |
+| `sensor` per temperature source | °C |
 
-**Availability:** `<base>/status` **and** `<base>/link` (mode `all`), so
-everything shows as unavailable if the ESP32 or the STM32 is gone.
-Discovery is sent again when HA announces `homeassistant/status = online`;
-it does not block the firmware.
+**Zone device** (`<client id>_<zid>`, `via_device` the controller, can be
+assigned to an area):
 
-**Switching a zone to `manual`:** the `climate` entity is kept but marked
-unavailable (own availability topic `<base>/zone/<zid>/climate`), so
-dashboards and automations keep their reference; switching back to
-`control` makes it available again. The temperature stays visible through
-the zone's temperature sensor. `climate` → off is unambiguous: heating off,
-valves at their minimum opening. "Manual" is not a climate state but the
-separate mode select.
+| Entity | Content |
+|---|---|
+| `climate` (named like the zone) | current temperature; target = the setpoint in use (cooling setpoint while cold is supplied); modes `auto` (zone on) / `off`; action heating / cooling / idle / off; **unavailable in mode `manual`** |
+| `sensor` Temperature | zone temperature, also in mode `manual` |
+| `sensor` Valve output | % |
+| `sensor` Supply temperature | diagnostic |
+| `number` Heating setpoint / Cooling setpoint | configuration |
+| `select` Mode | `control` / `manual` |
+| `binary_sensor` Temperature missing | problem |
+| `sensor` State | heating, cooling, paused, fallback, … (diagnostic) |
+
+**Per valve** (on its zone's device, or on the controller without a zone):
+`valve` with position (commandable outside of mode `control`),
+`binary_sensor` fault (attributes: the whole valve state), `sensor` motor
+current and `button` calibrate (both disabled by default).
 
 **If HA controls the rooms itself:** set the zone to `manual` and use HA's
 own thermostat with the `valve` entities.
 
-`climate` in short: it shows and sets the target temperature, shows the
-measured temperature, switches heating on/off and shows whether the zone
-is currently heating. Presets (eco/comfort) and schedules are not part of
-v1; HA or KNX change the setpoint for that.
+Presets (eco/comfort) and schedules are not part of v1; HA or KNX change
+the setpoints for that.
 
 ---
 

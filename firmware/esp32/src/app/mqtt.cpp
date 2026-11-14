@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "app/control.h"
+#include "app/discovery.h"
 #include "app/network.h"
 #include "app/settings.h"
 #include "app/shared.h"
@@ -47,7 +48,7 @@ struct OutMsg {
     bool subscribe;
     bool retain;
     char topic[kTopicMax];
-    char payload[1024];
+    char payload[1280];
 };
 
 QueueHandle_t g_in = nullptr;
@@ -107,7 +108,7 @@ void mqttTask(void *)
     static OutMsg out;
     static vdm::MqttConfig cfg;
     static char client_id[vdm::kNameSize], lwt[128];
-    mc.setBufferSize(1400);
+    mc.setBufferSize(1536);
     mc.setCallback(onMessage);
     mc.setSocketTimeout(5);
     mc.setKeepAlive(30);
@@ -231,13 +232,19 @@ float r2(float v)
 /* false if a subscription could not be queued (retried later) */
 bool subscribeAll()
 {
+    const vdm::Config &c = config();
     char t[kTopicMax];
     bool ok = true;
     snprintf(t, sizeof(t), "%s/zone/+/set", g_base);
     ok = enqueue(true, t, "", false, 500) && ok;
     snprintf(t, sizeof(t), "%s/valve/+/set", g_base);
     ok = enqueue(true, t, "", false, 500) && ok;
-    const vdm::Config &c = config();
+    snprintf(t, sizeof(t), "%s/set", g_base);
+    ok = enqueue(true, t, "", false, 500) && ok;
+    if (c.mqtt.discovery) {
+        snprintf(t, sizeof(t), "%s/status", c.mqtt.discovery_prefix);
+        ok = enqueue(true, t, "", false, 500) && ok;
+    }
     for (uint8_t i = 0; i < c.source_count; i++) {
         if (c.sources[i].type == vdm::SourceType::Mqtt) {
             ok = enqueue(true, engine().mqttTopic(i, t, sizeof(t)), "", false, 500) && ok;
@@ -266,6 +273,8 @@ void publishStates(bool force)
             failsafe = failsafe || (v.flags & VDM_VFLAG_FAILSAFE);
         }
         d["failsafe"] = failsafe;
+        static const char *const kHvac[] = {"auto", "heat", "cool"};
+        d["hvac_mode"] = kHvac[static_cast<uint8_t>(c.hvac.mode)];
         d["flow_guard"] = e.flow().active;
         d["flow_insufficient"] = e.flow().insufficient;
         d["flow_total"] = r1(e.flow().total / 10.0f);
@@ -287,20 +296,27 @@ void publishStates(bool force)
     for (uint8_t i = 0; i < c.zone_count; i++) {
         const vdm::ZoneConfig &zc = c.zones[i];
         const vdm::ZoneStatus &z = e.zone(i);
-        StaticJsonDocument<448> d;
+        /* missing values are null, so templates in Home Assistant give "unknown" */
+        StaticJsonDocument<512> d;
+        d["name"] = zc.name;
         d["mode"] = vdm::zoneModeName(zc.mode);
         d["enabled"] = zc.enabled;
         d["setpoint"] = r1(zc.setpoint);
         d["cool_setpoint"] = r1(zc.cool_setpoint);
+        /* the setpoint in use: cooling setpoint while cold is supplied */
+        d["target"] = r1(z.medium == vdm::Medium::Cool ? zc.cool_setpoint : zc.setpoint);
+        d["temperature"] = (char *)nullptr;
         if (z.has_temperature) {
             d["temperature"] = r2(z.temperature);
         }
+        d["supply"] = (char *)nullptr;
         if (z.has_supply) {
             d["supply"] = r1(z.supply);
         }
         d["source"] = vdm::sourceStateName(z.source);
         d["stale"] = z.source == vdm::SourceState::Stale || z.source == vdm::SourceState::Missing;
         d["medium"] = vdm::mediumName(z.medium);
+        d["output"] = (char *)nullptr;
         if (z.has_output) {
             d["output"] = r1(z.output);
         }
@@ -319,6 +335,9 @@ void publishStates(bool force)
         StaticJsonDocument<448> d;
         d["name"] = c.valves[ch].name;
         d["zone"] = c.valves[ch].zone;
+        d["position"] = (char *)nullptr;
+        d["mode"] = "unknown";
+        d["fault"] = "";
         if (g_model.valves_valid) {
             if (s.actual <= 1000) {
                 d["position"] = r1(s.actual / 10.0f);
@@ -342,6 +361,7 @@ void publishStates(bool force)
         const vdm::SourceStatus &s = e.source(i);
         StaticJsonDocument<192> d;
         d["name"] = c.sources[i].name;
+        d["value"] = (char *)nullptr;
         if (s.has_value) {
             d["value"] = r2(s.value);
             d["age"] = s.age_s;
@@ -393,6 +413,13 @@ void zoneCommand(const char *zid, const char *payload, size_t len)
         float v = d["setpoint"].as<float>();
         ok = ok && v >= 5.0f && v <= 30.0f;
         z.setpoint = roundf(v * 10.0f) / 10.0f;
+    }
+    if (!d["target"].isNull()) {
+        /* the setpoint in use (Home Assistant climate) */
+        float v = d["target"].as<float>();
+        bool cool = engine().zone(static_cast<uint8_t>(zi)).medium == vdm::Medium::Cool;
+        ok = ok && v >= (cool ? 15.0f : 5.0f) && v <= (cool ? 35.0f : 30.0f);
+        (cool ? z.cool_setpoint : z.setpoint) = roundf(v * 10.0f) / 10.0f;
     }
     if (!d["cool_setpoint"].isNull()) {
         float v = d["cool_setpoint"].as<float>();
@@ -459,9 +486,44 @@ void valveCommand(const char *num, const char *payload, size_t len)
     g_last_check = 0;
 }
 
+/* <base>/set: {"hvac_mode":"cool"} */
+void systemCommand(const char *payload, size_t len)
+{
+    StaticJsonDocument<128> d;
+    if (deserializeJson(d, payload, len) || !d.is<JsonObject>()) {
+        return;
+    }
+    const char *m = d["hvac_mode"];
+    if (m != nullptr) {
+        static const char *const kHvac[] = {"auto", "heat", "cool"};
+        for (uint8_t i = 0; i < 3; i++) {
+            if (strcmp(m, kHvac[i]) == 0) {
+                settingsEdit().hvac.mode = static_cast<vdm::HvacMode>(i);
+                settingsChanged();
+                controlKick();
+                g_last_check = 0;
+                return;
+            }
+        }
+        espLog(VDM_LOG_WARN, "MQTT: unknown hvac_mode '%s'", m);
+    }
+}
+
 void handle(const InMsg &m)
 {
     size_t bl = strlen(g_base);
+    char ha_status[48];
+    snprintf(ha_status, sizeof(ha_status), "%s/status", config().mqtt.discovery_prefix);
+    if (strcmp(m.topic, ha_status) == 0) {
+        if (strcmp(m.payload, "online") == 0) {
+            discoveryStart(); /* Home Assistant restarted */
+        }
+        return;
+    }
+    if (strncmp(m.topic, g_base, bl) == 0 && strcmp(m.topic + bl, "/set") == 0) {
+        systemCommand(m.payload, m.len);
+        return;
+    }
     if (strncmp(m.topic, g_base, bl) == 0 && m.topic[bl] == '/') {
         const char *rest = m.topic + bl + 1;
         char id[16];
@@ -503,6 +565,7 @@ void mqttReconfigure()
         }
     }
     g_resubscribe = true; /* sources may have changed */
+    discoveryStart();     /* names, zones, valves may have changed */
     for (bool &s : g_sent) {
         s = false; /* names or zones may have changed */
     }
@@ -529,6 +592,7 @@ void mqttLoop()
     if (g_just_connected) {
         g_just_connected = false;
         g_resubscribe = !subscribeAll();
+        discoveryStart();
         for (bool &s : g_sent) {
             s = false;
         }
@@ -537,6 +601,7 @@ void mqttLoop()
     if (g_resubscribe) {
         g_resubscribe = !subscribeAll();
     }
+    discoveryStep();
     if (now - g_last_check >= kPublishCheckMs || g_last_check == 0) {
         g_last_check = now;
         bool full = now - g_last_full >= kRepublishMs;
@@ -545,6 +610,21 @@ void mqttLoop()
         }
         publishStates(full);
     }
+}
+
+bool mqttPublish(const char *topic, const char *payload, bool retain)
+{
+    return g_connected && enqueue(false, topic, payload, retain, 0);
+}
+
+const char *mqttBase()
+{
+    return g_base;
+}
+
+const char *mqttClient()
+{
+    return g_client_id;
 }
 
 const char *mqttState()

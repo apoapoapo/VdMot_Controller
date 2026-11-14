@@ -20,6 +20,13 @@ void mqttLoop();
 /* the configuration changed (called by app/settings) */
 void mqttReconfigure();
 
+/* queues a message for the MQTT task; false if not connected or the queue
+ * is full (no waiting) */
+bool mqttPublish(const char *topic, const char *payload, bool retain);
+/* base topic and client id of the running connection */
+const char *mqttBase();
+const char *mqttClient();
+
 /* "disabled", "connecting", "connected" */
 const char *mqttState();
 
