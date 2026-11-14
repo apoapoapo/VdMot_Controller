@@ -161,8 +161,9 @@ void mqttTask(void *)
         for (int k = 0; k < 12 && xQueueReceive(g_out, &out, 0) == pdTRUE; k++) {
             if (out.subscribe) {
                 mc.subscribe(out.topic);
-            } else {
-                mc.publish(out.topic, out.payload, out.retain);
+            } else if (!mc.publish(out.topic, out.payload, out.retain)) {
+                espLog(VDM_LOG_WARN, "MQTT: publishing %s failed (%u bytes)", out.topic,
+                       static_cast<unsigned>(strlen(out.payload)));
             }
         }
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -259,6 +260,15 @@ void publishStates(bool force)
     const vdm::ControlEngine &e = engine();
     char err[8];
     readModel(g_model, err, sizeof(err));
+    if (g_model.valves_valid) {
+        uint16_t mask = 0;
+        for (uint8_t ch = 0; ch < VDM_MAX_CHANNELS; ch++) {
+            if (g_model.valves[ch].mode != VDM_MODE_DISABLED) {
+                mask |= static_cast<uint16_t>(1u << ch);
+            }
+        }
+        discoverySetEnabled(mask);
+    }
     char topic[kTopicMax];
     char out[kPayloadMax];
 

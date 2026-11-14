@@ -26,11 +26,12 @@ enum class Stage : uint8_t { Removed, Controller, Sources, Zones, Valves, Done }
 
 constexpr uint8_t kControllerItems = 5;
 constexpr uint8_t kSourceItems = 1;
-constexpr uint8_t kZoneItems = 9;
+constexpr uint8_t kZoneItems = 9 + vdm::kMaxInfoSources; /* + further temperatures */
 constexpr uint8_t kValveItems = 4;
 constexpr uint8_t kMaxPerPass = 6;
 
 Stage g_stage = Stage::Done;
+bool g_remove = false; /* the current message deletes the entity */
 uint8_t g_idx = 0;
 uint8_t g_sub = 0;
 
@@ -40,6 +41,7 @@ char g_ann_sources[vdm::kMaxSources][vdm::kIdSize];
 char g_rm_zones[vdm::kMaxZones][vdm::kIdSize];
 char g_rm_sources[vdm::kMaxSources][vdm::kIdSize];
 uint8_t g_rm_zone_count = 0, g_rm_source_count = 0;
+uint16_t g_enabled = 0x0FFF; /* channels enabled on the STM32 */
 
 DynamicJsonDocument *g_doc = nullptr;
 char g_topic[160];
@@ -96,9 +98,11 @@ void zoneDevice(JsonObject o, const vdm::ZoneConfig &z)
     char id[48];
     snprintf(id, sizeof(id), "%s_%s", mqttClient(), z.id);
     d.createNestedArray("ids").add(id);
-    d["name"] = z.name;
+    char name[2 * vdm::kNameSize];
+    snprintf(name, sizeof(name), "%s %s", config().device.name, z.name);
+    d["name"] = name;
     d["mf"] = "VdMot";
-    d["mdl"] = "Zone";
+    d["mdl"] = "VdMot zone";
     d["via_device"] = mqttClient();
 }
 
@@ -260,7 +264,7 @@ bool buildZone(uint8_t idx, uint8_t sub, Msg &m)
     case 2:
         m.component = "sensor";
         snprintf(m.object, sizeof(m.object), "%s_output", z.id);
-        o = base(m, "Valve output");
+        o = base(m, "Controller output");
         o["stat_t"] = st;
         o["val_tpl"] = "{{ value_json.output }}";
         o["unit_of_meas"] = "%";
@@ -334,8 +338,29 @@ bool buildZone(uint8_t idx, uint8_t sub, Msg &m)
         o["ent_cat"] = "diagnostic";
         availability(o);
         break;
-    default:
-        return false;
+    default: {
+        /* further temperatures of the zone */
+        uint8_t k = static_cast<uint8_t>(sub - 9);
+        if (k >= vdm::kMaxInfoSources) {
+            return false;
+        }
+        m.component = "sensor";
+        snprintf(m.object, sizeof(m.object), "%s_info%u", z.id, k + 1u);
+        int si = config().sourceIndex(z.info_sources[k]);
+        if (si < 0) {
+            g_remove = true; /* not (or no longer) used */
+            return true;
+        }
+        const vdm::SourceConfig &s = config().sources[si];
+        o = base(m, s.name);
+        char t[48];
+        snprintf(t, sizeof(t), "~/source/%s/state", s.id);
+        o["stat_t"] = t;
+        o["val_tpl"] = "{{ value_json.value }}";
+        temperature(o);
+        availability(o);
+        break;
+    }
     }
     zoneDevice(o, z);
     return true;
@@ -344,6 +369,18 @@ bool buildZone(uint8_t idx, uint8_t sub, Msg &m)
 bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
 {
     const vdm::Config &c = config();
+    if (!((g_enabled >> ch) & 1u)) {
+        /* channel disabled on the STM32: no entities */
+        static const char *const kVComp[] = {"valve", "binary_sensor", "sensor", "button"};
+        static const char *const kVObj[] = {"valve", "fault", "current", "calibrate"};
+        if (sub >= kValveItems) {
+            return false;
+        }
+        m.component = kVComp[sub];
+        snprintf(m.object, sizeof(m.object), "v%u_%s", ch + 1u, kVObj[sub]);
+        g_remove = true;
+        return true;
+    }
     const vdm::ValveConfig &v = c.valves[ch];
     char st[32], set[32];
     snprintf(st, sizeof(st), "~/valve/%u/state", ch + 1u);
@@ -355,14 +392,14 @@ bool buildValve(uint8_t ch, uint8_t sub, Msg &m)
         m.component = "valve";
         snprintf(m.object, sizeof(m.object), "v%u_valve", ch + 1u);
         o = base(m, v.name);
-        o["command_topic"] = set;
-        o["payload_open"] = "100";
-        o["payload_close"] = "0";
-        o["payload_stop"] = (char *)nullptr;
-        o["set_position_topic"] = set;
-        o["position_topic"] = st;
-        o["value_template"] = "{{ value_json.position }}";
+        /* position (actual) and opening/closing; commands are the target in % */
+        o["cmd_t"] = set;
+        o["stat_t"] = st;
+        o["val_tpl"] = "{% if value_json.position is none %}None{% else %}"
+                       "{{ {'position': value_json.position, 'state': value_json.mode} | tojson }}"
+                       "{% endif %}";
         o["reports_position"] = true;
+        o["json_attr_t"] = st;
         o["ic"] = "mdi:valve";
         break;
     case 1:
@@ -434,8 +471,13 @@ bool removedObject(uint8_t idx, uint8_t sub, Msg &m)
     if (sub >= kZoneItems) {
         return false;
     }
-    m.component = kComp[sub];
-    snprintf(m.object, sizeof(m.object), "%s_%s", g_rm_zones[idx], kObj[sub]);
+    if (sub >= 9) {
+        m.component = "sensor";
+        snprintf(m.object, sizeof(m.object), "%s_info%u", g_rm_zones[idx], sub - 8u);
+    } else {
+        m.component = kComp[sub];
+        snprintf(m.object, sizeof(m.object), "%s_%s", g_rm_zones[idx], kObj[sub]);
+    }
     return true;
 }
 
@@ -482,11 +524,19 @@ void nextStage()
     g_sub = 0;
 }
 
+bool buildAt(const vdm::Config &c, Msg &m);
+
 /* builds the message at the cursor; false: cursor moved, try again */
 bool build(Msg &m, bool &remove)
 {
-    const vdm::Config &c = config();
-    remove = false;
+    g_remove = false;
+    bool ok = buildAt(config(), m);
+    remove = g_remove;
+    return ok;
+}
+
+bool buildAt(const vdm::Config &c, Msg &m)
+{
     switch (g_stage) {
     case Stage::Removed:
         if (g_idx >= g_rm_source_count + g_rm_zone_count) {
@@ -497,7 +547,7 @@ bool build(Msg &m, bool &remove)
             nextIndex();
             return false;
         }
-        remove = true;
+        g_remove = true;
         return true;
     case Stage::Controller:
         if (g_sub >= kControllerItems) {
@@ -542,6 +592,14 @@ bool build(Msg &m, bool &remove)
 }
 
 } // namespace
+
+void discoverySetEnabled(uint16_t mask)
+{
+    if (mask != g_enabled) {
+        g_enabled = mask;
+        discoveryStart();
+    }
+}
 
 void discoveryStart()
 {

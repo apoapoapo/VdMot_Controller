@@ -12,12 +12,17 @@
  */
 #pragma once
 
+#include <stdint.h>
+
 namespace app
 {
 
 /* (re)announces everything; called on connect, on a configuration change
  * and when Home Assistant comes online */
 void discoveryStart();
+/* channels enabled on the STM32; a change re-announces (disabled channels
+ * get no entities) */
+void discoverySetEnabled(uint16_t mask);
 /* sends the next messages; called from the MQTT loop while connected */
 void discoveryStep();
 

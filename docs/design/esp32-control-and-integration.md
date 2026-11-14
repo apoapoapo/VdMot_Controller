@@ -327,22 +327,26 @@ the web page):
 | `sensor` Total valve opening | % (diagnostic) |
 | `sensor` per temperature source | °C |
 
-**Zone device** (`<client id>_<zid>`, `via_device` the controller, can be
-assigned to an area):
+**Zone device** (`<client id>_<zid>`, named "<device name> <zone name>",
+e.g. "VdMot Bathroom", `via_device` the controller, can be assigned to an
+area):
 
 | Entity | Content |
 |---|---|
 | `climate` (named like the zone) | current temperature; target = the setpoint in use (cooling setpoint while cold is supplied); modes `auto` (zone on) / `off`; action heating / cooling / idle / off; **unavailable in mode `manual`** |
 | `sensor` Temperature | zone temperature, also in mode `manual` |
-| `sensor` Valve output | % |
+| `sensor` Controller output | % (before factor and limits; the real positions are the `valve` entities) |
 | `sensor` Supply temperature | diagnostic |
 | `number` Heating setpoint / Cooling setpoint | configuration |
 | `select` Mode | `control` / `manual` |
 | `binary_sensor` Temperature missing | problem |
 | `sensor` State | heating, cooling, paused, fallback, … (diagnostic) |
+| `sensor` per further temperature | the zone's `info_sources` |
 
-**Per valve** (on its zone's device, or on the controller without a zone):
-`valve` with position (commandable outside of mode `control`),
+**Per enabled valve** (on its zone's device, or on the controller without a
+zone; channels disabled on the STM32 get no entities): `valve` with the
+actual position and opening/closing (commandable outside of mode
+`control`, attributes: the whole valve state),
 `binary_sensor` fault (attributes: the whole valve state), `sensor` motor
 current and `button` calibrate (both disabled by default).
 
