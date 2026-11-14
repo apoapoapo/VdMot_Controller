@@ -86,7 +86,7 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <li>JSON field: only if the payload is JSON, e.g. <code>{"temperature":21.5,"humidity":40}</code> → <code>temperature</code>; nested fields with a dot (<code>sensor.temp</code>). Empty = the payload is a plain number.</li>
 <li>Offset: correction added to the value.</li>
 <li>Max age: after this time without a new value the source counts as stale; zones using it go to their fallback position (0 = never). Publishers that only send on change need a regular resend.</li>
-<li>MQTT values are received once the MQTT integration is in place (next firmware step).</li></ul>
+<li>Home Assistant: an automation can publish a sensor to the default topic (see the design document), or use the topic of zigbee2mqtt etc. directly.</li></ul>
 <table><thead><tr><th>Name</th><th>Type</th><th>ROM id / MQTT topic</th><th>JSON field</th><th>Offset K</th><th>Max age s</th><th class="num">Value °C</th><th>State</th><th>Used by</th><th></th></tr></thead><tbody id="esources"></tbody></table>
 <div class="row"><button onclick="addSource('mqtt')">Add MQTT source</button><button class="p" onclick="saveSources()">Save sources</button></div>
 <div class="row mut" id="unused"></div></section>
@@ -106,7 +106,7 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 <section><h2>Network</h2><div class="grid" id="f-network"></div>
 <div class="row"><button class="p" onclick="saveForm('network')">Save</button><span class="mut">Takes effect after a restart. If no network comes up, the ESP32 opens the access point VdMot-XXXX (password vdmot-setup).</span></div></section>
 <section><h2>MQTT</h2><div class="grid" id="f-mqtt"></div>
-<div class="row"><button class="p" onclick="saveForm('mqtt')">Save</button><span class="mut">Stored already; the MQTT / Home Assistant integration follows in the next firmware step.</span></div></section>
+<div class="row"><button class="p" onclick="saveForm('mqtt')">Save</button><span class="mut">Home Assistant discovery follows in the next firmware step.</span></div></section>
 <section><h2>STM32 settings</h2>
 <form id="sys" onsubmit="save('system',this);return false"><div class="grid" id="sysf"></div>
 <div class="row"><button class="p">Save system settings</button><button type="button" onclick="defaults('sysf','sys')">Load defaults</button>
@@ -309,7 +309,7 @@ try{render(s)}catch(e){$('err').textContent='page error: '+e.message;console.err
 function render(s){
 const l=s.link;$('link').textContent='STM32 '+l.state+(l.paused_s?` (link paused, ${l.paused_s} s)`:'');$('link').className='pill '+(l.state==='connected'?'ok':'bad');
 $('ver').textContent='ESP32 '+s.esp.version+(s.stm?(' · STM32 '+s.stm.version+' ('+s.stm.mcu+', '+s.stm.hw+') · boot #'+s.stm.boot_count+', last reset: '+(RESETS[s.stm.reset_cause]||s.stm.reset_cause)+', up '+dur(s.diag&&s.diag.stm_uptime_s)):'');
-$('net').textContent=s.net.interface+' '+s.net.ip+(s.net.ap?(' · AP '+s.net.ap_ssid):'')+(s.net.time?' · '+s.net.time:'');$('err').textContent=s.error||'';
+$('net').textContent=s.net.interface+' '+s.net.ip+(s.net.ap?(' · AP '+s.net.ap_ssid):'')+(s.net.time?' · '+s.net.time:'')+(s.net.mqtt!=='disabled'?' · MQTT '+s.net.mqtt:'');$('err').textContent=s.error||'';
 $('cfginfo').textContent='Configuration at start: '+s.config;
 renderZoneStatus(s);
 const zname=id=>{const z=s.ctl.zones.find(x=>x.id===id);return z?z.name:''};

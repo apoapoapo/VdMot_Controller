@@ -131,6 +131,11 @@ void networkLoop()
     }
 }
 
+bool networkUp()
+{
+    return g_eth_ip || g_wifi_ip;
+}
+
 NetStatus netStatus()
 {
     NetStatus s{};

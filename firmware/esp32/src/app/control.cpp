@@ -166,6 +166,11 @@ void controlReconfigure()
     g_kick = true;
 }
 
+void controlMqtt(const char *topic, const char *payload, size_t len)
+{
+    g_engine.onMqtt(topic, payload, len, millis());
+}
+
 void controlKick()
 {
     g_kick = true;

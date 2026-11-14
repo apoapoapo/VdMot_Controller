@@ -23,6 +23,9 @@ const vdm::ControlEngine &engine();
 /* external valve target (web, later MQTT/KNX); evaluated at once */
 vdm::ControlEngine::Result controlSetTarget(uint8_t ch, uint16_t permille);
 
+/* a message on a subscribed topic (MQTT temperature sources) */
+void controlMqtt(const char *topic, const char *payload, size_t len);
+
 /* evaluates and sends right away instead of waiting for the next tick */
 void controlKick();
 

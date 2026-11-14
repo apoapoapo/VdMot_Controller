@@ -12,6 +12,7 @@
 #include <time.h>
 
 #include "app/control.h"
+#include "app/mqtt.h"
 #include "app/network.h"
 #include "app/settings.h"
 #include "app/shared.h"
@@ -306,6 +307,7 @@ void handleState()
     net["ap"] = ns.ap_active;
     net["ap_ssid"] = ns.ap_ssid;
     net["hostname"] = hostname();
+    net["mqtt"] = mqttState();
     time_t now_s = time(nullptr);
     if (now_s > 1600000000) {
         struct tm lt;

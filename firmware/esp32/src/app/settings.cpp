@@ -11,6 +11,7 @@
 #include "app/shared.h"
 
 #include "app/control.h"
+#include "app/mqtt.h"
 #include "core/config_store.h"
 
 namespace app
@@ -176,6 +177,7 @@ bool settingsCommit(const vdm::Config &c)
     g_cfg = c;
     updateHostname();
     controlReconfigure();
+    mqttReconfigure();
     return true;
 }
 

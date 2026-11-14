@@ -25,6 +25,8 @@ struct NetStatus {
 
 void networkBegin();
 void networkLoop();
+/* an interface has an IP address (not the setup access point) */
+bool networkUp();
 NetStatus netStatus();
 
 } // namespace app

@@ -268,22 +268,62 @@ entry; only setpoint, heating on/off and mode are accepted.
 ## 7. MQTT
 
 Base topic: `vdmot/<device-id>`, with `device-id` = `vdmot-` + the last 3
-bytes of the MAC in hex (configurable). Payloads are JSON. States are
-retained, commands are not.
+bytes of the Ethernet MAC in hex (both configurable). Payloads are JSON.
+States are retained and published on change (checked every 2 s) and in
+full every 5 minutes; commands are not retained. Valves are numbered 1…12.
 
 | Topic | Direction | Content |
 |---|---|---|
 | `<base>/status` | out, LWT | `online` / `offline` |
 | `<base>/link` | out | `online` / `offline` (STM32 link) |
-| `<base>/state` | out | `{failsafe, flow_guard, flow_added, versions…}` |
-| `<base>/zone/<zid>/state` | out | `{mode, heating, setpoint, temperature, stale, output, action}` |
+| `<base>/state` | out | `{failsafe, flow_guard, flow_insufficient, flow_total, flow_added, esp_version, stm_version}` |
+| `<base>/zone/<zid>/state` | out | `{mode, enabled, setpoint, cool_setpoint, temperature, supply, source, stale, medium, output, action}` |
 | `<base>/zone/<zid>/climate` | out | `online` in mode `control`, `offline` in mode `manual` (availability of the climate entity) |
-| `<base>/zone/<zid>/set` | in | `{"setpoint":21.5}`, `{"heating":"off"}`, `{"mode":"manual"}` |
-| `<base>/valve/<n>/state` | out | `{position, target, requested, mode, fault, current, …}` |
-| `<base>/valve/<n>/set` | in | `{"position":40}` (manual mode only), `{"calibrate":true}` |
-| `<base>/source/<sid>/state` | out | `{value, status, age}` |
+| `<base>/zone/<zid>/set` | in | any of `{"setpoint":21.5, "cool_setpoint":24, "enabled":false, "mode":"manual"}`; `enabled` also takes `"on"`/`"off"`/`"heat"`/`"cool"` |
+| `<base>/valve/<n>/state` | out | `{name, zone, position, target, requested, effective, mode, fault, current_ma, controlled}` |
+| `<base>/valve/<n>/set` | in | `{"position":40}` or a plain `40` (valves outside of a controlled zone), `{"calibrate":true}` |
+| `<base>/source/<sid>/state` | out | `{name, value, age, status}` |
+| `<base>/source/<sid>/set` | in | value of an MQTT source without its own topic (plain number) |
 
-MQTT temperature sources (3) subscribe to any topic configured there.
+MQTT temperature sources (3) subscribe to the topic configured there, or
+to `<base>/source/<sid>/set` if none is configured. Payloads that are not a
+number (e.g. `unavailable`) are ignored. Commands with invalid values are
+rejected as a whole and logged.
+
+The client (PubSubClient, no TLS) runs in its own task; a broker that is
+not reachable does not block the web page or the control.
+
+### 7.1 Temperatures from Home Assistant
+
+Create an MQTT source per room (topic empty), note its id (`s8`, …) and
+let an automation publish the HA sensors to the default topics, on every
+change and every 5 minutes (so `max_age_s` can stay at its default):
+
+```yaml
+automation:
+  - alias: VdMot room temperatures
+    mode: queued
+    trigger:
+      - platform: state
+        entity_id:
+          - sensor.office_temperature
+          - sensor.bedroom_temperature
+      - platform: time_pattern
+        minutes: "/5"
+    action:
+      - repeat:
+          for_each:
+            - { source: s8, entity: sensor.office_temperature }
+            - { source: s9, entity: sensor.bedroom_temperature }
+          sequence:
+            - service: mqtt.publish
+              data:
+                topic: "vdmot/vdmot-a1b2c3/source/{{ repeat.item.source }}/set"
+                payload: "{{ states(repeat.item.entity) }}"
+```
+
+The base topic is shown under Settings → MQTT and in the placeholder of the
+topic field.
 
 ## 8. Home Assistant (discovery)
 

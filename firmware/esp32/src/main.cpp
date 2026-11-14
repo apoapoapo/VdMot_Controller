@@ -13,6 +13,7 @@
 
 #include "app/control.h"
 #include "app/link_task.h"
+#include "app/mqtt.h"
 #include "app/network.h"
 #include "app/settings.h"
 #include "app/shared.h"
@@ -33,6 +34,7 @@ void setup()
     app::sharedInit();
     app::settingsBegin();
     app::controlBegin();
+    app::mqttBegin();
     app::startLinkTask();
     app::networkBegin();
     app::webBegin();
@@ -43,6 +45,7 @@ void loop()
     app::networkLoop();
     app::webLoop();
     app::controlLoop();
+    app::mqttLoop();
     app::settingsLoop();
     esp_task_wdt_reset();
     delay(2);
