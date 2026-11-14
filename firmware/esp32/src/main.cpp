@@ -9,6 +9,7 @@
  */
 #include <Arduino.h>
 #include <LittleFS.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 
 #include "app/control.h"
@@ -32,6 +33,16 @@ void setup()
         LittleFS.begin(true);
     }
     app::sharedInit();
+    {
+        static const char *const kReasons[] = {"unknown",    "power-on",  "external", "software",
+                                               "crash",      "watchdog",  "watchdog", "watchdog",
+                                               "deep sleep", "brown-out", "SDIO"};
+        esp_reset_reason_t r = esp_reset_reason();
+        const char *why = r < sizeof(kReasons) / sizeof(kReasons[0]) ? kReasons[r] : "?";
+        bool bad = r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT ||
+                   r == ESP_RST_WDT || r == ESP_RST_BROWNOUT;
+        app::espLog(bad ? VDM_LOG_WARN : VDM_LOG_INFO, "ESP32 started (reset: %s)", why);
+    }
     app::settingsBegin();
     app::controlBegin();
     app::mqttBegin();

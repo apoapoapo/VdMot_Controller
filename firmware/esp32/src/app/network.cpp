@@ -4,6 +4,7 @@
 #include "app/network.h"
 
 #include "app/settings.h"
+#include "app/shared.h"
 
 #include <ESPmDNS.h>
 #include <ETH.h>
@@ -41,17 +42,29 @@ void onEvent(arduino_event_id_t event)
         ETH.setHostname(hostname());
         break;
     case ARDUINO_EVENT_ETH_GOT_IP:
+        if (!g_eth_ip) {
+            espLog(VDM_LOG_INFO, "network: Ethernet up, %s", ETH.localIP().toString().c_str());
+        }
         g_eth_ip = true;
         break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
     case ARDUINO_EVENT_ETH_STOP:
+        if (g_eth_ip) {
+            espLog(VDM_LOG_WARN, "network: Ethernet down");
+        }
         g_eth_ip = false;
         break;
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        if (!g_wifi_ip) {
+            espLog(VDM_LOG_INFO, "network: WiFi up, %s", WiFi.localIP().toString().c_str());
+        }
         g_wifi_ip = true;
         break;
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
     case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+        if (g_wifi_ip) {
+            espLog(VDM_LOG_WARN, "network: WiFi down");
+        }
         g_wifi_ip = false;
         break;
     default:
@@ -74,6 +87,7 @@ void startWifi()
         return;
     }
     g_wifi_started = true;
+    espLog(VDM_LOG_INFO, "network: connecting to WiFi %s", g_net.ssid);
     WiFi.mode(g_ap_started ? WIFI_AP_STA : WIFI_STA);
     WiFi.setHostname(hostname());
     if (!g_net.dhcp) {
@@ -96,6 +110,7 @@ void startAp()
     g_ap_ssid = ssid;
     WiFi.mode(g_wifi_started ? WIFI_AP_STA : WIFI_AP);
     WiFi.softAP(ssid, kApPassword);
+    espLog(VDM_LOG_WARN, "network: no connection, setup access point %s opened", ssid);
 }
 
 } // namespace

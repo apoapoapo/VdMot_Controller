@@ -105,7 +105,8 @@ class LinkClient
     void setState(LinkState s, uint32_t now_ms);
     void storeSensors(const vdm_sensors_t &s);
     void storeValve(const vdm_valve_state_t &s, uint32_t now_ms);
-    void setError(const char *what, uint8_t status, uint8_t detail);
+    /* sets lastError() and writes it to the log */
+    void setError(const char *what, uint8_t status, uint8_t detail, uint32_t now_ms);
 
     ByteSink &out_;
     vdm_rx_t rx_;

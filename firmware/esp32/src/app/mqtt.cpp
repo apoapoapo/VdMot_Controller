@@ -114,6 +114,7 @@ void mqttTask(void *)
     mc.setKeepAlive(30);
     uint32_t last_try = 0;
     bool first = true;
+    bool failure_logged = false; /* one message per outage */
 
     for (;;) {
         if (g_restart) {
@@ -139,6 +140,10 @@ void mqttTask(void *)
             continue;
         }
         if (!mc.connected()) {
+            if (g_connected) {
+                espLog(VDM_LOG_WARN, "MQTT: connection lost (state %d)", mc.state());
+                failure_logged = true; /* no further message until connected again */
+            }
             g_connected = false;
             if (first || millis() - last_try >= kReconnectMs) {
                 first = false;
@@ -152,6 +157,13 @@ void mqttTask(void *)
                     mc.publish(lwt, "online", true);
                     g_connected = true;
                     g_just_connected = true;
+                    failure_logged = false;
+                } else if (!failure_logged) {
+                    /* PubSubClient states: -4 timeout, -2 connect failed (host
+                     * not reachable), 4 bad user/password, 5 not authorized */
+                    espLog(VDM_LOG_WARN, "MQTT: cannot connect to %s:%u (state %d), retrying",
+                           cfg.host, cfg.port, mc.state());
+                    failure_logged = true;
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(100));

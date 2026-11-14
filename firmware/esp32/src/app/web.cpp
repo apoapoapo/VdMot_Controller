@@ -432,13 +432,12 @@ void handleState()
         o["text"] = e.text;
         o["src"] = "stm";
     }
-    static vdm::LogEntry esp_log[kEspLogSize];
-    uint8_t n = espLogCopy(esp_log, kEspLogSize);
-    for (uint8_t i = 0; i < n; i++) {
+    vdm::LogEntry e; /* one at a time: no copy of the whole log */
+    for (uint8_t i = 0; espLogGet(i, e); i++) {
         JsonObject o = log.createNestedObject();
-        o["ms"] = esp_log[i].ms;
-        o["level"] = esp_log[i].level;
-        o["text"] = esp_log[i].text;
+        o["ms"] = e.ms;
+        o["level"] = e.level;
+        o["text"] = e.text; /* char array: copied */
         o["src"] = "esp";
     }
     doc["error"] = err;
@@ -847,6 +846,11 @@ void handleEspUploadData()
 void handleEspUploadDone()
 {
     reply(g_upload_ok, g_upload_error.length() ? g_upload_error : String("update failed"));
+    if (g_upload_ok) {
+        espLog(VDM_LOG_INFO, "ESP32 update written, restarting");
+    } else {
+        espLog(VDM_LOG_ERROR, "ESP32 update failed: %s", g_upload_error.c_str());
+    }
     if (g_upload_ok) {
         g_reboot_at = millis() + 1000;
     }

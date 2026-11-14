@@ -64,9 +64,9 @@ void setUpdateStatus(const UpdateStatus &s);
 UpdateStatus updateStatus();
 
 /* log of the ESP32 itself (control, configuration), shown with the STM32 log */
-constexpr uint8_t kEspLogSize = 16;
+constexpr uint8_t kEspLogSize = 32; /* fixed ring buffer: the oldest entry is overwritten */
 void espLog(uint8_t level, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
-/* copies the entries, oldest first; returns the count */
-uint8_t espLogCopy(vdm::LogEntry *out, uint8_t max);
+/* entry `i` of the log, oldest first; false if there is none */
+bool espLogGet(uint8_t i, vdm::LogEntry &out);
 
 } // namespace app

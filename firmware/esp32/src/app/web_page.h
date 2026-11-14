@@ -26,7 +26,7 @@ main{padding:16px;max-width:1300px;margin:0 auto}.tab{display:none;gap:16px}.tab
 section{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto}
 table{border-collapse:collapse;width:100%}td,th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
 th{color:var(--mut);font-weight:500}.num{text-align:right;font-variant-numeric:tabular-nums}
-.pill{padding:2px 8px;border-radius:10px;border:1px solid var(--line)}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.pill{padding:2px 8px;border-radius:10px;border:1px solid var(--line)}.pill.ok{border-color:var(--ok)}.pill.bad{border-color:var(--bad)}.pill.warn{border-color:var(--warn)}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
 input[type=number]{width:70px}input,button,select{font:inherit;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--fg)}
 input.w{width:220px}input.s{width:110px}input.n{width:170px}
 p.intro{margin:0 0 8px;color:var(--mut)}
@@ -48,7 +48,9 @@ label{display:flex;justify-content:space-between;align-items:center;gap:8px}prog
 </style></head><body>
 <div id="toast"></div>
 <header><h1 id="title">VdMot Controller</h1>
-<span id="link" class="pill">…</span><span id="ver" class="mut"></span><span id="net" class="mut"></span>
+<span id="link" class="pill">…</span><span id="netp" class="pill"></span><span id="mqttp" class="pill" style="display:none"></span>
+<span id="fsp" class="pill bad" style="display:none" title="the STM32 moved the valves to the failsafe position (no ESP32 commands)">FAILSAFE</span>
+<span id="ver" class="mut"></span><span id="net" class="mut"></span>
 <span id="err" class="bad"></span></header>
 <nav id="nav"><a href="#ov">Overview</a><a href="#rooms">Rooms &amp; valves</a><a href="#set">Settings</a><a href="#sys">System</a></nav>
 <main>
@@ -351,7 +353,12 @@ try{render(s)}catch(e){$('err').textContent='page error: '+e.message;console.err
 function render(s){
 const l=s.link;$('link').textContent='STM32 '+l.state+(l.paused_s?` (link paused, ${l.paused_s} s)`:'');$('link').className='pill '+(l.state==='connected'?'ok':'bad');
 $('ver').textContent='ESP32 '+s.esp.version+(s.stm?(' · STM32 '+s.stm.version+' ('+s.stm.mcu+', '+s.stm.hw+') · boot #'+s.stm.boot_count+', last reset: '+(RESETS[s.stm.reset_cause]||s.stm.reset_cause)+', up '+dur(s.diag&&s.diag.stm_uptime_s)):'');
-$('net').textContent=s.net.interface+' '+s.net.ip+(s.net.ap?(' · AP '+s.net.ap_ssid):'')+(s.net.time?' · '+s.net.time:'')+(s.net.mqtt!=='disabled'?' · MQTT '+s.net.mqtt:'');$('err').textContent=s.error||'';
+const n=s.net,np=$('netp'),mq=$('mqttp');
+np.textContent=(n.interface==='none'?'no network':n.interface==='ap'?'setup AP '+n.ap_ssid:n.interface+' '+n.ip)+(n.ap&&n.interface!=='ap'?' · AP '+n.ap_ssid:'');
+np.className='pill '+(n.interface==='ethernet'||n.interface==='wifi'?'ok':n.interface==='ap'?'warn':'bad');
+mq.style.display=n.mqtt==='disabled'?'none':'';mq.textContent='MQTT '+n.mqtt;mq.className='pill '+(n.mqtt==='connected'?'ok':'warn');
+$('fsp').style.display=s.valves.some(v=>v.flags&16)?'':'none';
+$('net').textContent=n.time||'';$('err').textContent=s.error||'';
 $('cfginfo').textContent='Configuration at start: '+s.config;
 renderZoneStatus(s);
 const zname=id=>{const z=s.ctl.zones.find(x=>x.id===id);return z?z.name:''};
@@ -390,7 +397,7 @@ $('heaptxt').textContent=`${used.toFixed(0)} % (${(e.heap/1024).toFixed(0)} of $
 const d=Object.assign({},s.link.stats,s.diag||{});$('diag').innerHTML=Object.entries(d).map(([k,v])=>`<span>${esc(k)}: <b>${esc(v)}</b></span>`).join('');
 /* log times: ESP32 milliseconds since start → clock time of the browser */
 const t0=Date.now()-s.esp.uptime_s*1000;
-$('log').innerHTML=s.log.slice().sort((a,b)=>b.ms-a.ms).map(e=>`<tr><td class=mut>${new Date(t0+e.ms).toLocaleTimeString()}</td><td>${e.src==='esp'?'ESP32':'STM32'}</td><td>${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
+$('log').innerHTML=s.log.slice().sort((a,b)=>b.ms-a.ms).map(e=>`<tr><td class=mut>${new Date(t0+e.ms).toLocaleTimeString()}</td><td>${e.src==='esp'?'ESP32':'STM32'}</td><td class="${['bad','warn','',''][e.level]}">${['error','warn','info','debug'][e.level]}</td><td>${esc(e.text)}</td></tr>`).join('')}
 loadCfg().then(refresh);setInterval(refresh,2000);
 </script></body></html>)HTML";
 

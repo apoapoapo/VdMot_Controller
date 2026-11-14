@@ -341,6 +341,8 @@ void LinkClient::linkDown(uint32_t now_ms)
 void LinkClient::onConnected(uint32_t now_ms)
 {
     setState(LinkState::Connected, now_ms);
+    static const char kMsg[] = "link: STM32 connected";
+    model_.addLog(now_ms, VDM_LOG_INFO, kMsg, sizeof(kMsg) - 1);
     model_.stats.link_ups++;
     hard_reset_done_ = false;
     have_evt_seq_ = false;
@@ -353,7 +355,7 @@ void LinkClient::onConnected(uint32_t now_ms)
     desired_dirty_ |= desired_valid_; /* resend what the user asked for */
 }
 
-void LinkClient::setError(const char *what, uint8_t status, uint8_t detail)
+void LinkClient::setError(const char *what, uint8_t status, uint8_t detail, uint32_t now_ms)
 {
     static const char *const kNames[] = {"ok",           "unknown message", "bad length",
                                          "out of range", "invalid channel", "busy",
@@ -361,6 +363,7 @@ void LinkClient::setError(const char *what, uint8_t status, uint8_t detail)
     const char *name = status < sizeof(kNames) / sizeof(kNames[0]) ? kNames[status] : "error";
     snprintf(last_error_, sizeof(last_error_), "%s: %s (status %u, detail %u)", what, name, status,
              detail);
+    model_.addLog(now_ms, VDM_LOG_WARN, last_error_, strlen(last_error_));
 }
 
 namespace
@@ -518,9 +521,9 @@ void LinkClient::onResponse(const vdm_frame_t &f, uint32_t now_ms)
                 }
             }
             desired_dirty_ |= sent;
-            setError("set target", status, detail);
+            setError("set target", status, detail, now_ms);
         } else if (status != VDM_OK) {
-            setError("set target", status, detail);
+            setError("set target", status, detail, now_ms);
         }
         targets_in_flight_ = 0;
         return;
@@ -531,7 +534,7 @@ void LinkClient::onResponse(const vdm_frame_t &f, uint32_t now_ms)
             model_.motor_valid = false;
         } else {
             setError(f.msg == VDM_MSG_SET_SYSTEM_CONFIG ? "system config" : "motor params", status,
-                     detail);
+                     detail, now_ms);
         }
         return;
     case VDM_MSG_SET_CHANNELS:
@@ -549,8 +552,9 @@ void LinkClient::onResponse(const vdm_frame_t &f, uint32_t now_ms)
             if (status == VDM_ERR_CHANNEL) {
                 snprintf(last_error_, sizeof(last_error_), "%s: channel %u is not enabled", what,
                          detail + 1u);
+                model_.addLog(now_ms, VDM_LOG_WARN, last_error_, strlen(last_error_));
             } else {
-                setError(what, status, detail);
+                setError(what, status, detail, now_ms);
             }
         } else if (f.msg != VDM_MSG_RESET) {
             next_states_ms_ = now_ms; /* show the effect soon */
