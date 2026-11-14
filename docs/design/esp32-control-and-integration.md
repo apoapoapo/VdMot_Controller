@@ -307,6 +307,10 @@ not sent.
 
 ## 8. Home Assistant (discovery)
 
+History: measured values (temperatures, positions, outputs, currents) are
+sensors with `state_class: measurement`, so Home Assistant keeps long-term
+statistics; temperatures and currents carry their device class.
+
 Entity names: Home Assistant puts the device name in front. Sources have
 an optional `short_name` that replaces their name there. Valve entities are
 named "Valve <function> <suffix>" (target, position, state, fault, motor
@@ -349,7 +353,7 @@ area):
 | `sensor` Supply temperature | diagnostic |
 | `number` Heating setpoint / Cooling setpoint | configuration, disabled by default (the climate sets both) |
 | `binary_sensor` Temperature missing | problem |
-| `sensor` State | heating, cooling, paused, fallback, … (diagnostic) |
+| `sensor` State | enum: off, idle, heating, cooling, paused, manual, fallback, hold (diagnostic; a timeline in the history) |
 | `sensor` Control sources | e.g. "Office (MQTT), Return (1-Wire, stale)" (diagnostic) |
 | `sensor` per further temperature | the zone's `info_sources` |
 

@@ -186,6 +186,7 @@ bool buildController(uint8_t sub, Msg &m)
         o = base(m, "Flow guard intervening");
         o["stat_t"] = "~/state";
         o["val_tpl"] = "{{ 'ON' if value_json.flow_guard else 'OFF' }}";
+        o["dev_cla"] = "running";
         o["ic"] = "mdi:pipe-valve";
         availability(o);
         break;
@@ -402,6 +403,15 @@ bool buildZone(uint8_t idx, uint8_t sub, Msg &m)
         o = base(m, "State");
         o["stat_t"] = st;
         o["val_tpl"] = "{{ value_json.action }}";
+        /* a fixed set of values: shown as a timeline in the history */
+        o["dev_cla"] = "enum";
+        {
+            JsonArray ops = o.createNestedArray("ops");
+            for (const char *a :
+                 {"off", "idle", "heating", "cooling", "paused", "manual", "fallback", "hold"}) {
+                ops.add(a);
+            }
+        }
         o["ic"] = "mdi:information-outline";
         o["ent_cat"] = "diagnostic";
         availability(o);
