@@ -535,14 +535,14 @@ void ControlEngine::evalZone(uint8_t i, uint32_t now_ms)
         return;
     }
     case SourceState::Pending:
-        if (z.pi.active()) { /* restored after a restart */
+        if (z.pi.active()) {
+            /* restored after a restart: keep the output, but no values yet,
+             * so neither heating nor cooling is claimed */
             z.has_output = true;
             st.has_output = true;
             st.output = z.applied;
             st.medium = z.pi_medium;
-            st.action = z.applied < kHeatingThreshold ? ZoneAction::Idle
-                        : z.pi_medium == Medium::Heat ? ZoneAction::Heating
-                                                      : ZoneAction::Cooling;
+            st.action = ZoneAction::Hold;
             return;
         }
         break;

@@ -169,7 +169,7 @@ const FAULTS=['','open circuit','blocked','timeout','overcurrent','calibration f
 const KINDS=['','DS18B20 °C','DS2438 VAD V','DS2438 VDD V','DS2438 °C'];
 const SSTAT=['ok','CRC error','unreachable','not measured','out of range'];
 const RESETS=['unknown','power-on','reset pin','software','watchdog','brown-out','low-power'];
-const ACTIONS={off:'off',idle:'idle',heating:'heating',cooling:'cooling',paused:'paused (no heat/cold supplied)',manual:'manual',fallback:'fallback (no temperature)',hold:'waiting for values'};
+const ACTIONS={off:'off',idle:'idle',heating:'heating',cooling:'cooling',paused:'paused (no heat/cold supplied)',manual:'manual',fallback:'fallback (no temperature)',hold:'waiting for temperature values'};
 function dur(s){if(s===undefined)return '?';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'d ':'')+(d||h?h+'h ':'')+m+'min'}
 /* [key, label, help] */
 const SYSF=[['link_timeout_s','Link timeout s','If the STM32 hears nothing from the ESP32 for this long, it moves all valves to the failsafe position. 0 = never.'],

@@ -201,6 +201,7 @@ void test_startup_hold_then_fallback()
     stmReady(300);
     run(10000);
     TEST_ASSERT_EQUAL(SourceState::Pending, eng->source(0).state);
+    TEST_ASSERT_EQUAL(ZoneAction::Hold, eng->zone(0).action); /* no values yet */
     TEST_ASSERT_EQUAL(ZoneAction::Hold, eng->zone(0).action);
     TEST_ASSERT_TRUE(eng->valve(0).has_target);
     TEST_ASSERT_EQUAL(300, eng->valve(0).effective); /* keeps the STM32 target */
