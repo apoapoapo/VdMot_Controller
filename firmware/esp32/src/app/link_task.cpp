@@ -167,6 +167,13 @@ void execute(const Command &c)
     case CommandType::SetTarget:
         client->setTarget(c.channel, c.value);
         break;
+    case CommandType::SetTargets:
+        for (uint8_t ch = 0; ch < VDM_MAX_CHANNELS; ch++) {
+            if ((c.mask >> ch) & 1u) {
+                client->setTarget(ch, c.targets[ch]);
+            }
+        }
+        break;
     case CommandType::Calibrate:
         client->calibrate(c.value);
         break;

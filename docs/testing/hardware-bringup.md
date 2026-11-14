@@ -32,9 +32,10 @@ VdMot_Controller 1.4.x: `ESP32_firmware.bin`, `STM32F411_C2_firmware.bin` /
 
 1. Open the legacy web interface → update page → **ESP32 update** and upload
    the v2 `firmware.bin` of the ESP32.
-2. The ESP32 restarts with v2. It uses the legacy network settings
-   (Ethernet/WiFi, DHCP or static IP, host name and web login) without
-   changing them, so it comes up at the same address.
+2. The ESP32 restarts with v2. On its very first start it takes over the
+   legacy network settings (Ethernet/WiFi, DHCP or static IP, station name
+   and web login) into its own configuration (`/config.json`), so it comes
+   up at the same address. The legacy NVS is not changed.
 3. If it cannot be reached after about a minute: v2 opens a WiFi access
    point **`VdMot-XXXX`**, password **`vdmot-setup`**; the page is at
    `http://192.168.4.1/`.
@@ -104,7 +105,52 @@ every 5 minutes (it assumes a hang), which does no harm.
 
 Screenshots of the page and the values of the Diagnostics section help most.
 
-## 6. Going back to the legacy firmware
+## 6. Room control (phase 2b)
+
+After the update all valves are without a zone and keep their positions;
+nothing changes until zones are set up.
+
+1. **Rooms & valves → Temperature sources:** the 1-Wire sensors found on the
+   bus are listed below the table; *add* the ones you want, give them names
+   and **Save sources**.
+2. **Zones:** *Add zone*, name it, choose the control temperature and the
+   profile (floor / radiator), **Save zones**.
+3. **Valves:** assign the valves to their zone, optionally minimum opening,
+   factor and flow priority, **Save valves**.
+4. **Overview:** per zone temperature, setpoint, output and state. Change
+   the setpoint; within the sample time (60 s radiator, 300 s floor) the
+   output and the valve targets follow. The column *Requested → effective*
+   shows when limits or the flow guard change a target.
+5. **Settings → Flow guard:** set a minimum total opening (e.g. 150) and
+   check that the flow guard opens the priority valves first when all zones
+   are satisfied (heating off on all zones is the quickest test).
+
+What to check and report:
+- Mode *manual*: the valve target inputs become editable, the setpoint is
+  locked; back to *control* the output continues without a jump.
+- Temperature missing: unplug a 1-Wire sensor of a zone; after its max age
+  (300 s) the zone shows *fallback* and the valves go to the fallback
+  position; plug it in again and control resumes. The log shows both.
+- ESP32 restart: the zones keep their output (controller state in RTC RAM),
+  the valves do not move.
+- Settings → Device / Network: change something, restart, check it is kept.
+  **Export configuration** once and keep the file.
+
+## 7. MQTT and Home Assistant
+
+1. Settings → MQTT: enable, broker, user, password; the header shows
+   "MQTT connected". Home Assistant discovery is on by default.
+2. Home Assistant shows a device for the controller and one per zone.
+3. Room temperatures from Home Assistant: per room an MQTT source with an
+   empty topic; import the blueprint
+   `blueprints/automation/vdmot/send_temperature.yaml` and create one
+   automation per room (sensor + the topic shown below the source's topic
+   field). Assign the sources to the zones as control temperature.
+4. Check: climate `heat_cool` controls with both setpoints, `off` lets the
+   "Valve target" sliders set the valves; the zone's "State" and "Control
+   sources" match the web page.
+
+## 8. Going back to the legacy firmware
 
 1. v2 page → **Start previous ESP32 firmware**: the ESP32 restarts with
    the firmware still stored in its other OTA slot (the legacy 1.4.x).
@@ -115,8 +161,7 @@ update.
 
 ## Known limitations of this test version
 
-- No MQTT / Home Assistant yet (phase 3), no PI controller (phase 2b).
-- Network settings cannot be changed in v2 yet; they come from the legacy
-  configuration.
+- Web page over plain HTTP and MQTT without TLS: use them in the local
+  network only.
 - The current measurement scale (138 µA per ADC digit) and the default
   thresholds are taken from the legacy firmware.

@@ -11,7 +11,9 @@
  *
  * Jobs per channel, in order of priority:
  *   DETECT     short opening move (a few pulses) to check the connection
- *   CALIBRATE  close to endstop, open to endstop (count), close (count)
+ *   CALIBRATE  open to endstop, close to endstop (count), open (count); ends
+ *              fully open, so the heating keeps flowing while other
+ *              channels calibrate
  *   REFERENCE  close to endstop to establish the position (after boot)
  *   MOVE       go to the target
  *
@@ -129,7 +131,7 @@ class ValveManager
   private:
     enum class Job : uint8_t { None, Detect, Calibrate, Reference, Move };
     enum class Step : uint8_t { Idle, PowerUp, Select, Running };
-    enum class CalPhase : uint8_t { Home, Open, Close };
+    enum class CalPhase : uint8_t { Home, Close, Open };
 
     struct Channel {
         ChannelPersist p;
@@ -219,8 +221,8 @@ class ValveManager
     uint16_t changed_ = 0;
     uint16_t persist_dirty_ = 0;
     uint16_t persist_urgent_ = 0;
-    uint32_t cal_open_counts_ = 0;
-    uint16_t cal_open_mean_ = 0;
+    uint32_t cal_close_counts_ = 0;
+    uint16_t cal_close_mean_ = 0;
     uint32_t last_live_ms_ = 0;
 
     static constexpr uint8_t kCalEventQueue = 4;

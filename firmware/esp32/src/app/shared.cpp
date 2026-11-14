@@ -6,6 +6,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 namespace app
@@ -20,6 +22,9 @@ vdm::Model g_model;
 bool g_model_valid = false;
 char g_error[64] = "";
 UpdateStatus g_update;
+vdm::LogEntry g_log[kEspLogSize];
+uint8_t g_log_head = 0;
+uint8_t g_log_count = 0;
 
 struct Lock {
     Lock()
@@ -76,6 +81,37 @@ UpdateStatus updateStatus()
 {
     Lock l;
     return g_update;
+}
+
+void espLog(uint8_t level, const char *fmt, ...)
+{
+    vdm::LogEntry e;
+    e.ms = millis();
+    e.level = level;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(e.text, sizeof(e.text), fmt, ap);
+    va_end(ap);
+    Serial.printf("[%lu] %s\n", static_cast<unsigned long>(e.ms), e.text);
+    Lock l;
+    uint8_t idx = static_cast<uint8_t>((g_log_head + g_log_count) % kEspLogSize);
+    if (g_log_count == kEspLogSize) {
+        g_log_head = static_cast<uint8_t>((g_log_head + 1u) % kEspLogSize);
+    } else {
+        g_log_count++;
+    }
+    g_log[idx] = e;
+}
+
+uint8_t espLogCopy(vdm::LogEntry *out, uint8_t max)
+{
+    Lock l;
+    uint8_t n = g_log_count < max ? g_log_count : max;
+    uint8_t first = static_cast<uint8_t>(g_log_count - n);
+    for (uint8_t i = 0; i < n; i++) {
+        out[i] = g_log[(g_log_head + first + i) % kEspLogSize];
+    }
+    return n;
 }
 
 } // namespace app

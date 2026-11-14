@@ -174,21 +174,40 @@ Done (2a, bring-up for the first hardware test):
   firmware), basic auth with the legacy web login, task watchdog.
 - Hardware test guide: [`../testing/hardware-bringup.md`](../testing/hardware-bringup.md).
 
-Open (2b):
-- Own versioned configuration (JSON on LittleFS) incl. network settings
-  and a settings page; migration from the legacy NVS.
-- PI controller with monotonic time base, proper anti-windup, staleness
-  check; sensor-to-valve assignment.
-- Syslog, time (SNTP).
+Done (2b), see the design [`../design/esp32-control-and-integration.md`](../design/esp32-control-and-integration.md):
+- `src/core` (host tested): `Config` (JSON, validation, sections with id
+  assignment and reference clean-up), `ConfigStore` (atomic write with
+  temporary file and backup), `ControlEngine` (temperature sources with
+  stale detection and start-up grace, zones in mode control/manual, PI
+  controller with conditional integration, bumpless start and RTC
+  snapshot, valve limits and factor, flow guard with priority valves),
+  tests with a room model in closed loop.
+- `src/app`: settings owner (`/config.json`, network settings taken over
+  once from the legacy NVS), control loop (targets to the STM32, STM32
+  failsafe position = fallback position, controller state in RTC RAM,
+  log), network from the configuration, web page with tabs (overview,
+  rooms & valves, settings, system) and configuration export/import.
 
-### Phase 3 – MQTT / Home Assistant
-- LWT + birth message, `availability_topic`, client id derived from MAC.
-- `unique_id` from MAC + channel (stable across renames).
-- Discovery on connect and on `homeassistant/status = online`, non-blocking.
-- Per valve: `valve` (real position), `climate` (if PI control is active),
-  `sensor` (current, temperatures, counters as `total_increasing`), `button`
-  (calibrate), `binary_sensor` (fault), `number` with min/max/step.
-- JSON payloads + `value_template`; no more format variants.
+Also done in 2b (from the first hardware tests): heating and cooling from
+the supply temperature with a pause while nothing is supplied (zones
+independent), several control sources per zone (mean), calibration ending
+fully open (STM32).
+
+Open: syslog.
+
+### Phase 3 – MQTT / Home Assistant (done)
+- PubSubClient in its own task, LWT `<base>/status`, client id derived
+  from the MAC (configurable), states on change and every 5 minutes,
+  commands for zones, valves and global settings; MQTT temperature
+  sources.
+- Home Assistant discovery: controller device and one device per zone
+  (climate `heat_cool`/`off` with both setpoints, valve target sliders
+  that are unavailable while the zone controls, positions, states,
+  faults, further temperatures); `unique_id`s from the client id, entities
+  of removed zones/sources deleted; checked against the discovery
+  schemas of Home Assistant.
+- Blueprint `blueprints/automation/vdmot/send_temperature.yaml` to send
+  Home Assistant temperature sensors to MQTT sources.
 
 ### Phase 4 – Web UI
 - New, small, built against the REST/WebSocket API; build step integrated into PlatformIO.
