@@ -65,3 +65,6 @@ B-sample integration: ![-](./b-sample_1.png "b-sample integration")
 - only small rework needed, 2 mm cutback for RJ11 needed
 
 housing: ![-](./housing.png "housing")
+
+A 3D-printable alternative (base, lid and optional DIN rail clip) is in
+[enclosure/](./enclosure/README.md).
