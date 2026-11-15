@@ -1,22 +1,23 @@
-# Hardware bring-up of firmware v2
+# Installation and upgrade from 1.x
 
-This guide describes the first test of firmware v2 on a VdMot Controller
-board (C2/C3, WT32-ETH01, STM32F411 or STM32F401 BlackPill) **without a USB
-adapter**: everything is done through the web interfaces.
+This guide installs firmware v2 on a VdMot Controller board (C2/C3,
+WT32-ETH01, STM32F411 or STM32F401 BlackPill) **without a USB adapter**:
+everything is done through the web interfaces, starting from the legacy
+firmware 1.4.x or from an earlier v2.
 
 ## 1. Get the binaries
 
-The CI builds them for every pull request. Open the pull request, go to
-**Checks → CI → Summary** and download the binaries (single `.bin` files,
-named after target, board and build number, e.g.
-`vdmot-v2-stm32-f401ce_c2-build12.bin`):
+Download them from the [latest release](https://github.com/apoapoapo/VdMot_Controller/releases/latest)
+(`vdmot-<version>-<target>-<board>.bin`). Test builds of pull requests are
+under **Checks → CI → Summary** of the pull request, named with the build
+number instead (`vdmot-v2-<target>-<board>-build<N>.bin`).
 
 | Binary | Use |
 |---|---|
-| `vdmot-v2-esp32-wt32_eth01-buildN.bin` | ESP32 (WT32-ETH01) |
-| `vdmot-v2-stm32-f411_c2-buildN.bin` | STM32**F411**CE BlackPill |
-| `vdmot-v2-stm32-f401_c2-buildN.bin` | STM32**F401**CC BlackPill (V2.0); also runs on the F401CE |
-| `vdmot-v2-stm32-f401ce_c2-buildN.bin` | STM32**F401**CE BlackPill (WeAct V3.0) |
+| `vdmot-<version>-esp32-wt32_eth01.bin` | ESP32 (WT32-ETH01) |
+| `vdmot-<version>-stm32-f411_c2.bin` | STM32**F411**CE BlackPill |
+| `vdmot-<version>-stm32-f401_c2.bin` | STM32**F401**CC BlackPill (V2.0); also runs on the F401CE |
+| `vdmot-<version>-stm32-f401ce_c2.bin` | STM32**F401**CE BlackPill (WeAct V3.0) |
 
 Check the marking on the BlackPill's chip (`STM32F411CEU6`, `STM32F401CCU6`
 or `STM32F401CEU6`; WeAct V3.0 boards exist with F401CE and F411CE). Every
@@ -86,7 +87,7 @@ every 5 minutes (it assumes a hang), which does no harm.
   Pause link*. The valves open after the timeout; when the pause ends the
   log shows "STM32 was in failsafe" and the valves return to their targets.
 
-## 5. What to check and report
+## 5. Checks after the installation
 
 - Link: state stays *connected*; Diagnostics → `retries`, `timeouts`,
   `stm_rx_crc_err` should stay at or near 0.
@@ -103,9 +104,10 @@ every 5 minutes (it assumes a hang), which does no harm.
 - Power cycle: positions are re-established by reference runs, no
   recalibration.
 
-Screenshots of the page and the values of the Diagnostics section help most.
+When reporting a problem, screenshots of the page, the log (System tab) and
+the values of the Diagnostics section help most.
 
-## 6. Room control (phase 2b)
+## 6. Room control
 
 After the update all valves are without a zone and keep their positions;
 nothing changes until zones are set up.
@@ -159,7 +161,7 @@ What to check and report:
 Alternatively upload the legacy `ESP32_firmware.bin` through the v2 ESP32
 update.
 
-## Known limitations of this test version
+## Known limitations
 
 - Web page over plain HTTP and MQTT without TLS: use them in the local
   network only.

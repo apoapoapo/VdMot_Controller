@@ -1,0 +1,76 @@
+name: Release
+
+# Builds the firmware images when a release is published on GitHub and
+# attaches them to it. The release tag must match the version in both
+# platformio.ini files, e.g. v2.0.0.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Check the version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        name: Compare the tag with platformio.ini
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          for p in firmware/esp32 firmware/stm32; do
+            v=$(python3 - "$p/platformio.ini" <<'EOF'
+          import configparser, sys
+          c = configparser.ConfigParser(interpolation=None)
+          c.read(sys.argv[1])
+          f = c["fw"]
+          print(f"{f['version_major']}.{f['version_minor']}.{f['version_patch']}")
+          EOF
+            )
+            if [ "v$v" != "$TAG" ]; then
+              echo "::error::tag $TAG does not match $p/platformio.ini (v$v)"
+              exit 1
+            fi
+          done
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }} (${{ matrix.env }})
+    needs: version
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: stm32
+            env: f411_c2
+          - target: stm32
+            env: f401_c2
+          - target: stm32
+            env: f401ce_c2
+          - target: esp32
+            env: wt32_eth01
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install platformio
+      - name: Build
+        working-directory: firmware/${{ matrix.target }}
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DFW_BUILD=${{ github.run_number }}
+        run: pio run -e ${{ matrix.env }}
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: vdmot-${{ needs.version.outputs.version }}-${{ matrix.target }}-${{ matrix.env }}.bin
+        run: |
+          cp firmware/${{ matrix.target }}/.pio/build/${{ matrix.env }}/firmware.bin "$NAME"
+          gh release upload "${{ github.event.release.tag_name }}" "$NAME" --clobber

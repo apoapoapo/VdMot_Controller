@@ -1,92 +1,76 @@
-# VdMot_Controller
+# VdMot Controller – firmware v2
 
-> **About this fork – firmware v2 in progress**
->
-> This repository is a fork of the VdMot Controller by
-> [Lenti84](https://github.com/Lenti84/VdMot_Controller) and
-> [SurfGargano](https://github.com/SurfGargano/VdMot_Controller).
-> The firmware for both controllers is being rebuilt as **v2** (new
-> ESP32 ⇄ STM32 protocol, persistent calibration, reworked Home Assistant
-> integration). See [docs/refactoring/PLAN.md](./docs/refactoring/PLAN.md)
-> and [docs/protocol/stm32-esp32-link.md](./docs/protocol/stm32-esp32-link.md).
->
-> - New code: `common/`, `firmware/` (work in progress, not usable yet)
-> - Legacy firmware 1.4.x: `software_stm32/`, `software_esp32/` (unchanged);
->   binaries are available from the upstream releases.
+A controller for up to 12 **HmIP-VdMot** valve actuators (or other DC motor
+valves) for floor heating and radiators – local, without a cloud, with its
+own room control and a Home Assistant integration.
 
-This is a controller for HmIP-VdMot actuators.
+This repository is a fork of the VdMot Controller by
+[Lenti84](https://github.com/Lenti84/VdMot_Controller) and
+[SurfGargano](https://github.com/SurfGargano/VdMot_Controller), who designed
+the hardware and wrote the firmware 1.x. The firmware of both controllers
+was rebuilt here as **v2**.
 
-It controls up to 12 HmIP-VdMot actuators or other DC motor valves and is based on custom hardware/software.
+![C2 sample PCB with soldered components](./hardware/c2-sample_pcb_soldered.jpg)
 
-It's an alternative to the original HmIP-FALMOT-C12 hardware.
-My intention was to create a cheap solution to operate my 18 valves (floor heating + radiators).
-I wanted a pure offline system (no cloud connection) and to be free of the constraint to use further components like CCU2/CCU3.
+## Features of firmware v2
 
-**Hardware for VdMot_Controller is available at Tindie: https://www.tindie.com/products/lenti/vdmot_controller/**
+- **Valves**: learns every valve (opening and closing stroke counted by the
+  motor's back-EMF pulses), endstop detection by current, calibration kept
+  over restarts, automatic recalibration, faults detected and reported
+  (open circuit, blocked, timeout, …), valves re-detected when plugged in.
+- **Room control on the controller**: zones (rooms or heating circuits)
+  with one or more valves and a PI controller (floor / radiator / custom
+  profile); temperatures from 1-Wire sensors or MQTT, several sensors per
+  zone averaged.
+- **Heating and cooling**: what the water supplies is judged per zone from
+  the supply temperature; the controller pauses while a cycling heat pump
+  is off (no wind-up), cools with its own setpoint.
+- **Safety**: minimum total opening for systems without a buffer tank or
+  bypass, fallback position when a temperature is missing, and a failsafe
+  on the STM32 that opens the valves when the ESP32 is gone.
+- **Home Assistant** via MQTT discovery: one device per zone with a climate
+  (heat/cool with both setpoints), valve positions and targets, states and
+  faults; a blueprint sends Home Assistant temperatures to the controller.
+- **Web page** for setup and diagnostics; configuration export/import;
+  updates of both controllers through the web page (the ESP32 flashes the
+  STM32), no USB adapter needed.
+- **Robust link** between ESP32 and STM32: binary protocol with framing,
+  CRC and retries.
 
-![-](./hardware/c2-sample_pcb_soldered.jpg "C2 sample PCB with soldered components")
+## Installation
 
-## Features:
-- controls up to 12 HmIP-VdMot actuators or other DC motor valves
-- learns valve movement by counting motor revolutions based on Back EMF
-  - so positioning accuracy should be (very) good
-- valve current is evaluated and can be monitored
-- interfaces
-  - actual: MQTT, JSON
-  - optional: MODBUS-RTU via RS485, CAN via external MCP2515
-- integrated 1-wire master
-  - a lot of additional temperature sensors like DS18B20 could be connected
-  - sensor values can be linked to a valve for combined data evaluation
-  - usefull for hydraulic balancing ("Hydraulischer Abgleich")
-  
-## Status
-- b-sample hardware is working
-- c-sample hardware is working
-- c2-sample hardware finished and working
-- valve learning, opening and closing is working
-- connection to [FHEM](https://fhem.de/) or [IOBroker] established via MQTT
-- read and set values via JSON
-- first productive test passed
-- tests of 2 different actuators done, see [system/actuators.md](./system/actuators.md)
-- one wire sensors working
-  - sensors can be coupled to a valve
-  - therefore the sensor adresses are stored and assigned at startup
-- eeprom working
-- STM32 can be flashed by ESP32 via WebUI without additional hardware
-- simple test of RS485 interface with modbus-rtu master sucessfully performed
-- simple test of CAN interface via MCP2515 sucessfully performed
-- replaced relay with fet transistors
+Binaries: [latest release](https://github.com/apoapoapo/VdMot_Controller/releases/latest).
+Installing and upgrading from the firmware 1.4.x, step by step:
+[docs/installation.md](./docs/installation.md). Going back to 1.4.x is
+possible at any time.
+
+## Documentation
+
+| Document | Content |
+|---|---|
+| [docs/installation.md](./docs/installation.md) | installation, upgrade, first steps, room control, Home Assistant |
+| [docs/design/esp32-control-and-integration.md](./docs/design/esp32-control-and-integration.md) | configuration, room control, heating/cooling, flow guard, MQTT topics, Home Assistant entities |
+| [docs/protocol/stm32-esp32-link.md](./docs/protocol/stm32-esp32-link.md) | protocol between ESP32 and STM32 |
+| [docs/refactoring/PLAN.md](./docs/refactoring/PLAN.md) | why and how v2 was built, open points |
+| [hardware/hardware.md](./hardware/hardware.md) | hardware |
+
+## Repository layout
+
+- `firmware/esp32`, `firmware/stm32`, `common/protocol`: firmware v2
+  (PlatformIO; host tests with `pio test -e native`)
+- `blueprints/`: Home Assistant blueprint
+- `hardware/`, `assembly_kit/`, `system/`: hardware of the original project
+- `software_esp32/`, `software_stm32/`: legacy firmware 1.4.x, unchanged
+  (described in [software.md](./software.md))
 
 ## Hardware
-- find description of hardware here [hardware/hardware.md](./hardware/hardware.md)
 
-## Software
-For details please see [software.md](./software.md)
-- written in C / C++
-- uses great arduino libraries
-- developed using PlatformIO
-- STM32 BlackPill
-  - controls the valves / dc-motors
-    - endstop by real current measurement
-    - counting motor revolutions by back-EMF
-    - state detection
-  - controlls 1-wire devices via GPIO
-    - optional via DS2482-100 1-wire bus master ic
-  - 
-- ESP32 / WT32-ETH01
-  - communication with MQTT broker or JSON interface
-  - visualize system status
-    - valve state
-    - temperature sensors
-    - optional: integrated control algorithm 
-  - OTA software update (of ESP32 and STM32)
-  - 
-Latest Software can be found here :
-https://github.com/SurfGargano/VdMot_Controller/releases/latest
-
-Hardware can be found here:
-**Hardware for VdMot_Controller is available via mail. Please write to vdmot@storbecknet.de. **
-
+The hardware (C2/C3 board with an STM32 BlackPill and a WT32-ETH01) comes
+from the original project; see [hardware/hardware.md](./hardware/hardware.md).
+Hardware was available via the original authors, see their repositories.
 
 ## License
-This project is licensed under the terms of the GNU General Public License v3.0 license.
+
+GNU General Public License v3.0, see [GPLv3-LICENSE.md](./GPLv3-LICENSE.md).
+Copyright of the original hardware and firmware 1.x: Lenti84 and
+SurfGargano.
