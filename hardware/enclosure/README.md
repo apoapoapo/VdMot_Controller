@@ -48,8 +48,7 @@ length).
   datasheet, the position of the jack fronts was measured on a test print
   (`FRONT_JACK_Y`, `BACK_JACK_Y`). The jack fronts sit flush with the outside
   (0.1 mm recess). The jack windows start 0.5 mm above the PCB, because the
-  jack body is raised at its front. Behind a 1.0 mm outer skin the windows
-  are wider, for the panel-stop flanges of the jacks.
+  jack body is raised at its front.
 - The back jacks stick out only ~1.8 mm over the PCB edge, so the back wall is
   1.6 mm thick (front: 2.0 mm).
 - Front: windows for the jacks X1..X10, engraved with 1..10.

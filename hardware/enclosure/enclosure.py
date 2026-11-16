@@ -95,16 +95,14 @@ PIN_POS = [
 ]
 
 # 4P4C modular jacks X1..X12 (MEBP 4-4S). The STEP model contains a smaller
-# jack (11.5 mm high); height, width and flanges are taken from the datasheet,
-# the position of the jack fronts was measured on a test print.
+# jack (11.5 mm high); height and width are taken from the datasheet, the
+# position of the jack fronts was measured on a test print. The panel-stop
+# flanges from the datasheet need no relief in the wall (verified by printing).
 JACK_B = 11.18  # body width
-JACK_A = 13.72  # width over the panel-stop flanges
 JACK_H = 16.0  # height above the PCB
 JACK_PEG_TO_REAR = 10.07  # split-foot pegs to the rear end of the jack (datasheet)
-JACK_FLANGE = (1.2, 2.3)  # flange position behind the jack front (= panel thickness 1.2)
 JACK_RECESS = 0.1  # jack front behind the outer wall face
 JACK_Z0 = 0.8  # the jack body is raised above the PCB at its front (only the rear feet sit on it)
-JACK_SKIN = 1.0  # outer wall skin in front of the flanges (datasheet panel: 1.2, minus tolerance)
 # (x center, y of the pegs, +1 = opening towards -y / front, -1 = towards +y / back)
 JACK_PITCH = (140.31 - 4.11) / 9.0
 FRONT_JACKS = [(9.71 + i * JACK_PITCH, 6.10) for i in range(10)]  # X1..X10
@@ -226,13 +224,10 @@ def wall_cuts():
     cuts = []
     through = (-1.0, WALL + 1.0)
     jack_z = (JACK_Z0 - 0.3, JACK_H + WIN_CLR)
-    flange_d = (JACK_RECESS + JACK_SKIN, WALL + 1.0)
     for side, jacks in (("front", FRONT_JACKS), ("back", BACK_JACKS)):
         for xc, _ in jacks:
-            # Opening for the jack body in the outer skin, wider relief behind it for the flanges.
-            hb, ha = JACK_B / 2 + WIN_CLR, JACK_A / 2 + 0.3
+            hb = JACK_B / 2 + WIN_CLR
             cuts.append((side, xc - hb, xc + hb, *jack_z, *through))
-            cuts.append((side, xc - ha, xc + ha, *jack_z, *flange_d))
     for x0, x1, z0, z1 in BACK_WINDOWS:
         z0 -= WIN_CLR if z0 > 0 else 0.2
         cuts.append(("back", x0 - WIN_CLR, x1 + WIN_CLR, z0, z1 + WIN_CLR, *through))
@@ -481,17 +476,15 @@ def make_din_clip():
 
 
 def jack_envelopes():
-    """Datasheet envelope (body + panel-stop flanges) of the 12 modular jacks, for check_fit.py."""
+    """Envelope of the 12 modular jacks (datasheet size, measured position), for check_fit.py."""
     solids = []
     for jacks, front, d in ((FRONT_JACKS, FRONT_JACK_Y, 1), (BACK_JACKS, BACK_JACK_Y, -1)):
         for xc, peg in jacks:
             # Front part (wall region) is raised by JACK_Z0, the rear part sits on the PCB.
             ys_front = sorted((front, front + d * 3.0))
             ys_rear = sorted((front + d * 3.0, peg + d * JACK_PEG_TO_REAR))
-            fs = sorted((front + d * JACK_FLANGE[0], front + d * JACK_FLANGE[1]))
             solids.append(box(xc - JACK_B / 2, xc + JACK_B / 2, *ys_front, JACK_Z0, JACK_H).val())
             solids.append(box(xc - JACK_B / 2, xc + JACK_B / 2, *ys_rear, 0, JACK_H).val())
-            solids.append(box(xc - JACK_A / 2, xc + JACK_A / 2, *fs, JACK_Z0, JACK_H).val())
     return solids
 
 
