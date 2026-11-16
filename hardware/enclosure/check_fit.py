@@ -8,7 +8,8 @@ Collision check of the enclosure against the PCB STEP model.
   3. python3 check_fit.py path/to/c3-sample_3D.step
 
 Reports every component that intersects the base, the lid or the DIN clip,
-and checks that each part is a single valid solid.
+and checks that each part is a single valid solid. The modular jacks are
+checked against their datasheet envelope in addition to the STEP model.
 """
 
 import os
@@ -78,10 +79,14 @@ def main():
     comps = load_components(sys.argv[1])
     pcb = cq.Solid.makeBox(enc.PCB_W, enc.PCB_D, enc.PCB_T, cq.Vector(0, 0, -enc.PCB_T))
     comps.append(pcb)
+    # The STEP model has smaller modular jacks than the real MEBP 4-4S: add the datasheet envelope.
+    comps += enc.jack_envelopes()
     print(f"{len(comps)} component shapes loaded")
 
+    base = enc.make_base()
     parts = {
-        "base": enc.make_base().val(),
+        "base": base.val(),
+        "base_wallmount": enc.add_wall_tabs(base).val(),
         "lid": enc.make_lid().val(),
         "din_clip": enc.din_clip_in_assembly(enc.make_din_clip()).val(),
     }

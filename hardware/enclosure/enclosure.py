@@ -48,20 +48,35 @@ MAX_PART_Z = 25.6  # highest component above the PCB top
 SPLIT_Z = 5.0  # height of the base/lid parting plane above the PCB top
 
 LEDGE_W = 1.8  # how far the support ledge reaches under the PCB edge
-END_GAP = 5.8  # extra room at both short ends (screw towers live there)
+END_GAP = 6.8  # extra room at both short ends (screw towers live there)
 
 # Screws: 4x M3 from the bottom through the base into the lid.
-TOWER_D = 7.0
+TOWER_D = 8.0
 SCREW_HOLE_D = 3.4
 SCREW_HEAD_D = 6.2  # counterbore for ISO 4762 / ISO 7380 heads
 SCREW_HEAD_H = 3.2
-# "insert": M3 heat-set insert (outer d ~4.0-4.2, length 5.7)
+# "insert": M3 heat-set insert (tip d ~4.0, knurl d ~4.6-5.0, length <= 6)
 # "tap"   : self-tapping directly into the plastic
 LID_HOLE_MODE = "insert"
-INSERT_D = 4.0
+INSERT_D = 4.3  # printed holes come out smaller than modelled
 INSERT_DEPTH = 6.5
+INSERT_CHAMFER = 0.5  # lead-in at the hole entry
 TAP_D = 2.6
 TAP_DEPTH = 10.0
+
+# Magnet pockets in the bottom of both end blocks of the base (wall/plate mounting).
+MAGNET = True
+MAGNET_D = 8.0  # disc magnet diameter
+MAGNET_H = 3.0  # disc magnet height
+MAGNET_CLR = 0.3  # added to the diameter (press fit, glue recommended)
+MAGNET_Y = [30.0, 56.0]
+
+# Screw tabs for wall/plate mounting (separate base variant "base_wallmount").
+TAB_LEN = 12.0  # how far the tabs stick out at both ends
+TAB_W = 26.0
+TAB_T = 4.0
+TAB_SLOT_D = 4.5  # screw slot width (screws up to 4 mm)
+TAB_SLOT_L = 4.0  # slot length along x (tolerance for the hole spacing)
 
 # Hold-down pins in the lid (positions on the PCB that are free of parts).
 PIN_D = 4.0
@@ -79,14 +94,25 @@ PIN_POS = [
     (152.5, 65.5),
 ]
 
-# Connector windows taken from the STEP model: (x_min, x_max, z_min, z_max)
-# in PCB coordinates. Clearance is added later.
-JACK_W = 11.2
-JACK_H = 11.5
+# 4P4C modular jacks X1..X12 (MEBP 4-4S, datasheet "with split foot").
+# The STEP model contains a smaller jack, only its split-foot pegs match the
+# real part, so the jack envelope is built from the datasheet around the pegs.
+JACK_B = 11.18  # body width
+JACK_A = 13.72  # width over the panel-stop flanges
+JACK_H = 16.0  # height above the PCB
+JACK_DEPTH = 20.57
+JACK_PEG_TO_FRONT = 10.5  # split-foot pegs to the jack front
+JACK_FLANGE = (1.2, 2.3)  # flange position behind the jack front (= panel thickness 1.2)
+JACK_RECESS = 0.1  # jack front behind the outer wall face
+# (x center, y of the pegs, +1 = opening towards -y / front, -1 = towards +y / back)
 JACK_PITCH = (140.31 - 4.11) / 9.0
-FRONT_WINDOWS = [(4.11 + i * JACK_PITCH, 4.11 + i * JACK_PITCH + JACK_W, 0.0, JACK_H) for i in range(10)]
+FRONT_JACKS = [(9.71 + i * JACK_PITCH, 6.10) for i in range(10)]  # X1..X10
+BACK_JACKS = [(130.79, 79.90), (145.90, 79.90)]  # X12, X11
+FRONT_JACK_Y = FRONT_JACKS[0][1] - JACK_PEG_TO_FRONT  # jack front, -4.4
+BACK_JACK_Y = BACK_JACKS[0][1] + JACK_PEG_TO_FRONT  # jack front, 90.4
 FRONT_LABELS = [str(i + 1) for i in range(10)]
 
+# Other windows in the back wall, from the STEP model: (x_min, x_max, z_min, z_max).
 TERMINAL_H = 13.0  # taller than the header, room for the mating plug
 BACK_WINDOWS = [
     (11.38, 27.42, 12.05, 25.55),  # RJ45 of the WT32-ETH01
@@ -94,10 +120,9 @@ BACK_WINDOWS = [
     (54.66, 71.14, 0.0, TERMINAL_H),  # X17 RS485
     (74.26, 90.74, 0.0, TERMINAL_H),  # X19 CAN
     (102.00, 113.40, 0.0, TERMINAL_H),  # X13 power
-    (125.19, 136.39, 0.0, JACK_H),  # X12
-    (140.30, 151.50, 0.0, JACK_H),  # X11
 ]
-BACK_LABELS = ["LAN", "1-Wire", "RS485", "CAN", "PWR", "12", "11"]
+BACK_LABELS = ["LAN", "1-Wire", "RS485", "CAN", "PWR"]
+BACK_JACK_LABELS = ["12", "11"]
 
 # Ventilation slots in the lid roof: rows of slots along y.
 VENT_W = 2.0
@@ -125,10 +150,11 @@ DIN_HOOK_GAP = 1.3  # room for the 1.0 mm rail flange
 
 IN_X0 = -CLR - END_GAP
 IN_X1 = PCB_W + CLR + END_GAP
-IN_Y0 = -CLR
-IN_Y1 = PCB_D + CLR
 OUT_X0, OUT_X1 = IN_X0 - WALL, IN_X1 + WALL
-OUT_Y0, OUT_Y1 = IN_Y0 - WALL, IN_Y1 + WALL
+# Front and back walls are placed so the jack fronts end up flush with the outside.
+OUT_Y0 = FRONT_JACK_Y - JACK_RECESS
+OUT_Y1 = BACK_JACK_Y + JACK_RECESS
+IN_Y0, IN_Y1 = OUT_Y0 + WALL, OUT_Y1 - WALL
 
 PCB_BOT = -PCB_T
 FLOOR_TOP = PCB_BOT - UNDER_PCB
@@ -136,8 +162,10 @@ BASE_BOT = FLOOR_TOP - FLOOR
 ROOF_BOT = MAX_PART_Z + TOP_CLEAR
 LID_TOP = ROOF_BOT + ROOF
 
-TOWER_X = [IN_X0 + TOWER_D / 2 - 1.2, IN_X1 - TOWER_D / 2 + 1.2]
+TOWER_X = [-CLR - 0.4 - TOWER_D / 2, PCB_W + CLR + 0.4 + TOWER_D / 2]
 TOWER_Y = [IN_Y0 + 8.0, IN_Y1 - 8.0]
+# Centers of the solid end blocks, moved 0.6 mm inwards to keep the outer wall thicker.
+MAGNET_X = [(OUT_X0 + LEDGE_W) / 2 + 0.6, (PCB_W - LEDGE_W + OUT_X1) / 2 - 0.6]
 TOWERS = [(x, y) for x in TOWER_X for y in TOWER_Y]
 
 DIN_CENTER = (PCB_W / 2, PCB_D / 2)
@@ -179,23 +207,49 @@ def engrave(body, origin, xdir, normal, text, size):
         return body
 
 
-def windows(cut_z0, cut_z1, which):
-    """Connector windows through the front/back wall, limited to cut_z0..cut_z1."""
+def wall_box(side, x0, x1, d0, d1, z0, z1):
+    """Box in the front/back wall; d0..d1 is the depth measured inwards from the outer face."""
+    if side == "front":
+        return box(x0, x1, OUT_Y0 + d0, OUT_Y0 + d1, z0, z1)
+    return box(x0, x1, OUT_Y1 - d1, OUT_Y1 - d0, z0, z1)
+
+
+def wall_cuts():
+    """All connector cutouts in the front/back wall: (side, x0, x1, z0, z1, d0, d1), clearances included."""
+    cuts = []
+    through = (-1.0, WALL + 1.0)
+    jack_z = (-0.2, JACK_H + WIN_CLR)
+    flange_d = (JACK_RECESS + JACK_FLANGE[0] - 0.1, WALL + 1.0)
+    for side, jacks in (("front", FRONT_JACKS), ("back", BACK_JACKS)):
+        for xc, _ in jacks:
+            # Opening for the jack body in the outer skin, wider relief behind it for the flanges.
+            hb, ha = JACK_B / 2 + WIN_CLR, JACK_A / 2 + 0.3
+            cuts.append((side, xc - hb, xc + hb, *jack_z, *through))
+            cuts.append((side, xc - ha, xc + ha, *jack_z, *flange_d))
+    for x0, x1, z0, z1 in BACK_WINDOWS:
+        z0 -= WIN_CLR if z0 > 0 else 0.2
+        cuts.append(("back", x0 - WIN_CLR, x1 + WIN_CLR, z0, z1 + WIN_CLR, *through))
+    return cuts
+
+
+def windows(which):
+    """Cutters for the base (open towards the top) or the lid (open towards the bottom)."""
     solids = []
-    for side, wins in (("front", FRONT_WINDOWS), ("back", BACK_WINDOWS)):
-        y0, y1 = (OUT_Y0 - 1, IN_Y0 + 0.5) if side == "front" else (IN_Y1 - 0.5, OUT_Y1 + 1)
-        for x0, x1, z0, z1 in wins:
-            z0 -= WIN_CLR if z0 > 0 else 0.2
-            z1 += WIN_CLR
-            if which == "base":
-                if z0 >= SPLIT_Z:
-                    continue
-                zz0, zz1 = z0, cut_z1  # open towards the parting plane
-            else:
-                if z1 <= SPLIT_Z:
-                    continue
-                zz0, zz1 = cut_z0, z1
-            solids.append(box(x0 - WIN_CLR, x1 + WIN_CLR, y0, y1, zz0, zz1))
+    for side, x0, x1, z0, z1, d0, d1 in wall_cuts():
+        if which == "base" and z0 < SPLIT_Z:
+            solids.append(wall_box(side, x0, x1, d0, d1, z0, SPLIT_Z + 1))
+        if which == "lid" and z1 > SPLIT_Z:
+            solids.append(wall_box(side, x0, x1, d0, d1, SPLIT_Z - 1, z1))
+    return solids
+
+
+def tongues():
+    """Base wall raised below windows that start above the parting plane (RJ45),
+    so the gap under the connector is closed. The lid notch slides over it."""
+    solids = []
+    for side, x0, x1, z0, _, d0, d1 in wall_cuts():
+        if z0 >= SPLIT_Z + 1.0 and d0 < 0:
+            solids.append(wall_box(side, x0 + 0.3, x1 - 0.3, 0, WALL, SPLIT_Z - 0.1, z0))
     return solids
 
 
@@ -215,6 +269,13 @@ def make_base():
         box(IN_X0, IN_X1, IN_Y0, LEDGE_W, FLOOR_TOP - 0.1, PCB_BOT),
         box(IN_X0, IN_X1, PCB_D - LEDGE_W, IN_Y1, FLOOR_TOP - 0.1, PCB_BOT),
     ]
+    # The jacks stick out over the front/back PCB edge, so the walls are further
+    # out than the board. These rims locate the board edges (top stays below the
+    # jack bodies, which start at the PCB top).
+    ledges += [
+        box(IN_X0, IN_X1, IN_Y0, -CLR, PCB_BOT, -0.3),
+        box(IN_X0, IN_X1, PCB_D + CLR, IN_Y1, PCB_BOT, -0.3),
+    ]
     for ledge in ledges:
         body = body.union(ledge)
 
@@ -224,9 +285,17 @@ def make_base():
         body = body.cut(cyl(x, y, BASE_BOT - 1, SPLIT_Z + 1, SCREW_HOLE_D))
         body = body.cut(cyl(x, y, BASE_BOT - 1, BASE_BOT + SCREW_HEAD_H, SCREW_HEAD_D))
 
-    # Connector windows (open to the top).
-    for w in windows(None, SPLIT_Z + 1, "base"):
+    # Connector windows (open to the top) and the tongue below the RJ45.
+    for t in tongues():
+        body = body.union(t)
+    for w in windows("base"):
         body = body.cut(w)
+
+    # Magnet pockets, open to the bottom.
+    if MAGNET:
+        for x in MAGNET_X:
+            for y in MAGNET_Y:
+                body = body.cut(cyl(x, y, BASE_BOT - 1, BASE_BOT + MAGNET_H + 0.2, MAGNET_D + MAGNET_CLR))
 
     # Holes for the DIN rail clip / wall mounting.
     for x, y in DIN_SCREWS:
@@ -241,8 +310,35 @@ def make_base():
                 body = body.cut(box(x - VENT_W / 2, x + VENT_W / 2, y0, y1, BASE_BOT - 1, FLOOR_TOP + 1))
 
     # Small chamfer on the bed edge against elephant foot.
-    body = body.faces("<Z").edges().chamfer(0.5)
+    body = body.faces("<Z").edges("not %CIRCLE").chamfer(0.5)
     return body
+
+
+def add_wall_tabs(base):
+    """Base variant with screw tabs at both short ends for wall/plate mounting."""
+    yc = PCB_D / 2
+    for side in (-1, 1):
+        x_wall = OUT_X0 if side < 0 else OUT_X1
+        x_out = x_wall + side * TAB_LEN
+        tab = (
+            cq.Workplane("XY")
+            .workplane(offset=BASE_BOT)
+            .center((x_wall - side * 1.0 + x_out) / 2, yc)
+            .rect(abs(x_out - x_wall) + 1.0, TAB_W)
+            .extrude(TAB_T)
+            .edges("|Z")
+            .fillet(4.0)
+        )
+        xs = x_wall + side * TAB_LEN / 2
+        slot = (
+            cq.Workplane("XY")
+            .workplane(offset=BASE_BOT - 1)
+            .center(xs, yc)
+            .slot2D(TAB_SLOT_L + TAB_SLOT_D, TAB_SLOT_D, angle=0)
+            .extrude(TAB_T + 2)
+        )
+        base = base.union(tab).cut(slot)
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +355,9 @@ def make_lid():
         body = body.union(cyl(x, y, SPLIT_Z, ROOF_BOT + 0.1, TOWER_D))
         if LID_HOLE_MODE == "insert":
             body = body.cut(cyl(x, y, SPLIT_Z - 1, SPLIT_Z + INSERT_DEPTH, INSERT_D))
+            r = INSERT_D / 2
+            lead_in = cq.Solid.makeCone(r + INSERT_CHAMFER + 1, r, INSERT_CHAMFER + 1, cq.Vector(x, y, SPLIT_Z - 1))
+            body = body.cut(cq.Workplane("XY").add(lead_in))
         else:
             body = body.cut(cyl(x, y, SPLIT_Z - 1, SPLIT_Z + TAP_DEPTH, TAP_D))
 
@@ -268,7 +367,7 @@ def make_lid():
         body = body.union(pin)
 
     # Connector windows (open to the bottom).
-    for w in windows(SPLIT_Z - 1, None, "lid"):
+    for w in windows("lid"):
         body = body.cut(w)
 
     # Ventilation slots in the roof, keeping away from the pins.
@@ -302,8 +401,10 @@ def make_lid():
 
     # Labels.
     label_z = (JACK_H + WIN_CLR + ROOF_BOT) / 2 + 0.5
-    for (x0, x1, _, _), txt in zip(FRONT_WINDOWS, FRONT_LABELS):
-        body = engrave(body, ((x0 + x1) / 2, OUT_Y0, label_z), (1, 0, 0), (0, -1, 0), txt, 5.0)
+    for (xc, _), txt in zip(FRONT_JACKS, FRONT_LABELS):
+        body = engrave(body, (xc, OUT_Y0, label_z), (1, 0, 0), (0, -1, 0), txt, 5.0)
+    for (xc, _), txt in zip(BACK_JACKS, BACK_JACK_LABELS):
+        body = engrave(body, (xc, OUT_Y1, label_z), (-1, 0, 0), (0, 1, 0), txt, 4.0)
     for (x0, x1, _, z1), txt in zip(BACK_WINDOWS, BACK_LABELS):
         if z1 > 20:  # RJ45 window reaches the roof, no room above it
             continue
@@ -371,6 +472,18 @@ def make_din_clip():
     return clip
 
 
+def jack_envelopes():
+    """Datasheet envelope (body + panel-stop flanges) of the 12 modular jacks, for check_fit.py."""
+    solids = []
+    for jacks, front, d in ((FRONT_JACKS, FRONT_JACK_Y, 1), (BACK_JACKS, BACK_JACK_Y, -1)):
+        for xc, _ in jacks:
+            ys = sorted((front, front + d * JACK_DEPTH))
+            fs = sorted((front + d * JACK_FLANGE[0], front + d * JACK_FLANGE[1]))
+            solids.append(box(xc - JACK_B / 2, xc + JACK_B / 2, *ys, 0, JACK_H).val())
+            solids.append(box(xc - JACK_A / 2, xc + JACK_A / 2, *fs, 0, JACK_H).val())
+    return solids
+
+
 def din_clip_in_assembly(clip):
     return clip.translate((DIN_CENTER[0], DIN_CENTER[1], BASE_BOT))
 
@@ -389,19 +502,23 @@ def main():
     os.makedirs(args.out, exist_ok=True)
 
     base = make_base()
+    base_wall = add_wall_tabs(base)
     lid = make_lid()
     clip = make_din_clip()
 
     # STEP files in assembly position (PCB frame).
     cq.exporters.export(base, os.path.join(args.out, "vdmot_enclosure_base.step"))
+    cq.exporters.export(base_wall, os.path.join(args.out, "vdmot_enclosure_base_wallmount.step"))
     cq.exporters.export(lid, os.path.join(args.out, "vdmot_enclosure_lid.step"))
     cq.exporters.export(din_clip_in_assembly(clip), os.path.join(args.out, "vdmot_enclosure_din_clip.step"))
 
     # STL files in print orientation, resting on z = 0.
     base_p = base.translate((0, 0, -BASE_BOT))
+    base_wall_p = base_wall.translate((0, 0, -BASE_BOT))
     lid_p = lid.rotate((0, 0, 0), (1, 0, 0), 180).translate((0, 0, LID_TOP))
     clip_p = clip.rotate((0, 0, 0), (1, 0, 0), 180)
-    for name, part in (("base", base_p), ("lid", lid_p), ("din_clip", clip_p)):
+    parts = (("base", base_p), ("base_wallmount", base_wall_p), ("lid", lid_p), ("din_clip", clip_p))
+    for name, part in parts:
         cq.exporters.export(part, os.path.join(args.out, f"vdmot_enclosure_{name}.stl"), tolerance=0.02, angularTolerance=0.1)
 
     bb = base.union(lid).val().BoundingBox()
