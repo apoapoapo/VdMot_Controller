@@ -54,9 +54,11 @@ length).
 - Front: windows for the jacks X1..X10, engraved with 1..10.
 - Back: windows for the RJ45 of the WT32-ETH01 (LAN), the pluggable terminals
   X18 (1-Wire), X17 (RS485), X19 (CAN), X13 (power) and the jacks X12/X11.
-  The terminal windows are as high as the headers (8.4 mm + clearance). Below
+  The terminal windows are 10.5 mm high: the headers are 7.82 mm, the latch
+  arms of the plugs need the rest. Below
   the RJ45 the base wall rises up to the connector, so there is no open gap.
-- Ventilation slots in the roof, both end walls and the floor.
+- Ventilation slots in the roof (symmetric, also above the WT32-ETH01), both
+  end walls and the floor. Slots are left out where the hold-down pins are.
 - Four M3 screws from below through the base into heat-set inserts in the lid.
 
 ## Mounting options
@@ -148,9 +150,8 @@ It reports every component that intersects a part and fails if there is any.
   RJ12 jacks closer to the board edge and is not covered.
 - The STEP model exports the PCB only 0.44 mm thick. The enclosure assumes a
   standard 1.6 mm board (parameter `PCB_T`).
-- The model contains only the PCB side of the pluggable terminals (CTB9359).
-  The windows are sized for the header; the plug (CTB9202) enters the header
-  through the same opening, its screw flanges stay outside. Increase
-  `TERMINAL_H` if your plugs do not fit.
+- The model contains only the PCB side of the pluggable terminals. The
+  windows are sized for the CTB9309/AO header and the latch arms of the
+  CTB9209 plug; adjust `TERMINAL_H` for other parts.
 - USB-C of the BlackPill, the jumpers and the button S1 are only accessible
   with the lid removed.

@@ -118,7 +118,7 @@ BACK_JACK_Y = BACK_JACKS[0][1] + JACK_PEG_TO_FRONT - BACK_JACK_CORR  # jack fron
 FRONT_LABELS = [str(i + 1) for i in range(10)]
 
 # Other windows in the back wall, from the STEP model: (x_min, x_max, z_min, z_max).
-TERMINAL_H = 8.4  # header height (STEP model); the plug fits through the same opening
+TERMINAL_H = 10.1  # room for the latch arms of the plugs (CTB9209) above the header (7.82 mm)
 BACK_WINDOWS = [
     (11.38, 27.42, 12.05, 25.55),  # RJ45 of the WT32-ETH01
     (34.86, 51.34, 0.0, TERMINAL_H),  # X18 1-Wire
@@ -133,7 +133,7 @@ BACK_JACK_LABELS = ["12", "11"]
 VENT_W = 2.0
 VENT_PITCH = 5.0
 VENT_Y = (30.0, 58.0)
-VENT_X = (38.0, 150.0)
+VENT_SPAN = 140.0  # slots spread symmetrically around the enclosure center (also above the ESP)
 
 # Text engraving
 TEXT = True
@@ -376,9 +376,9 @@ def make_lid():
         body = body.cut(w)
 
     # Ventilation slots in the roof, keeping away from the pins.
-    n = int((VENT_X[1] - VENT_X[0]) / VENT_PITCH) + 1
-    for i in range(n):
-        x = VENT_X[0] + i * VENT_PITCH
+    k = int(VENT_SPAN / 2 / VENT_PITCH)
+    for i in range(-k, k + 1):
+        x = (OUT_X0 + OUT_X1) / 2 + i * VENT_PITCH
         y0, y1 = VENT_Y
         if any(abs(px - x) < PIN_D / 2 + VENT_W / 2 + 1.0 and y0 - 3 < py < y1 + 3 for px, py in PIN_POS):
             continue
