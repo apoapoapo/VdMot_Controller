@@ -66,10 +66,10 @@ TAP_DEPTH = 10.0
 
 # Magnet pockets in the bottom of both end blocks of the base (wall/plate mounting).
 MAGNET = True
-MAGNET_D = 8.0  # disc magnet diameter
+MAGNET_D = 6.0  # disc magnet diameter
 MAGNET_H = 3.0  # disc magnet height
 MAGNET_CLR = 0.3  # added to the diameter (press fit, glue recommended)
-MAGNET_Y = [30.0, 56.0]
+MAGNET_Y = [20.0, 43.0, 66.0]
 
 # Screw tabs for wall/plate mounting (separate base variant "base_wallmount").
 TAB_LEN = 12.0  # how far the tabs stick out at both ends
@@ -104,16 +104,21 @@ JACK_DEPTH = 20.57
 JACK_PEG_TO_FRONT = 10.5  # split-foot pegs to the jack front
 JACK_FLANGE = (1.2, 2.3)  # flange position behind the jack front (= panel thickness 1.2)
 JACK_RECESS = 0.1  # jack front behind the outer wall face
+JACK_Z0 = 0.8  # the jack body is raised above the PCB at its front (only the rear feet sit on it)
+JACK_SKIN = 1.0  # outer wall skin in front of the flanges (datasheet panel: 1.2, minus tolerance)
+# Measured on a test print: the back jacks X11/X12 sit ~0.5 mm deeper than the
+# footprint + datasheet suggest, the front jacks X1..X10 are flush.
+BACK_JACK_CORR = 0.4
 # (x center, y of the pegs, +1 = opening towards -y / front, -1 = towards +y / back)
 JACK_PITCH = (140.31 - 4.11) / 9.0
 FRONT_JACKS = [(9.71 + i * JACK_PITCH, 6.10) for i in range(10)]  # X1..X10
 BACK_JACKS = [(130.79, 79.90), (145.90, 79.90)]  # X12, X11
 FRONT_JACK_Y = FRONT_JACKS[0][1] - JACK_PEG_TO_FRONT  # jack front, -4.4
-BACK_JACK_Y = BACK_JACKS[0][1] + JACK_PEG_TO_FRONT  # jack front, 90.4
+BACK_JACK_Y = BACK_JACKS[0][1] + JACK_PEG_TO_FRONT - BACK_JACK_CORR  # jack front, 90.0
 FRONT_LABELS = [str(i + 1) for i in range(10)]
 
 # Other windows in the back wall, from the STEP model: (x_min, x_max, z_min, z_max).
-TERMINAL_H = 13.0  # taller than the header, room for the mating plug
+TERMINAL_H = 8.4  # header height (STEP model); the plug fits through the same opening
 BACK_WINDOWS = [
     (11.38, 27.42, 12.05, 25.55),  # RJ45 of the WT32-ETH01
     (34.86, 51.34, 0.0, TERMINAL_H),  # X18 1-Wire
@@ -218,8 +223,8 @@ def wall_cuts():
     """All connector cutouts in the front/back wall: (side, x0, x1, z0, z1, d0, d1), clearances included."""
     cuts = []
     through = (-1.0, WALL + 1.0)
-    jack_z = (-0.2, JACK_H + WIN_CLR)
-    flange_d = (JACK_RECESS + JACK_FLANGE[0] - 0.1, WALL + 1.0)
+    jack_z = (JACK_Z0 - 0.3, JACK_H + WIN_CLR)
+    flange_d = (JACK_RECESS + JACK_SKIN, WALL + 1.0)
     for side, jacks in (("front", FRONT_JACKS), ("back", BACK_JACKS)):
         for xc, _ in jacks:
             # Opening for the jack body in the outer skin, wider relief behind it for the flanges.
@@ -477,10 +482,13 @@ def jack_envelopes():
     solids = []
     for jacks, front, d in ((FRONT_JACKS, FRONT_JACK_Y, 1), (BACK_JACKS, BACK_JACK_Y, -1)):
         for xc, _ in jacks:
-            ys = sorted((front, front + d * JACK_DEPTH))
+            # Front part (wall region) is raised by JACK_Z0, the rear part sits on the PCB.
+            ys_front = sorted((front, front + d * 3.0))
+            ys_rear = sorted((front + d * 3.0, front + d * JACK_DEPTH))
             fs = sorted((front + d * JACK_FLANGE[0], front + d * JACK_FLANGE[1]))
-            solids.append(box(xc - JACK_B / 2, xc + JACK_B / 2, *ys, 0, JACK_H).val())
-            solids.append(box(xc - JACK_A / 2, xc + JACK_A / 2, *fs, 0, JACK_H).val())
+            solids.append(box(xc - JACK_B / 2, xc + JACK_B / 2, *ys_front, JACK_Z0, JACK_H).val())
+            solids.append(box(xc - JACK_B / 2, xc + JACK_B / 2, *ys_rear, 0, JACK_H).val())
+            solids.append(box(xc - JACK_A / 2, xc + JACK_A / 2, *fs, JACK_Z0, JACK_H).val())
     return solids
 
 
