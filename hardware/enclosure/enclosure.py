@@ -52,7 +52,7 @@ END_GAP = 6.8  # extra room at both short ends (screw towers live there)
 
 # Screws: 4x M3 from the bottom through the base into the lid.
 TOWER_D = 8.0
-SCREW_HOLE_D = 3.4
+SCREW_HOLE_D = 3.5  # clearance hole for M3 (printed holes come out smaller)
 SCREW_HEAD_D = 6.2  # counterbore for ISO 4762 / ISO 7380 heads
 SCREW_HEAD_H = 3.2
 # "insert": M3 heat-set insert (tip d ~4.0, knurl d ~4.6-5.0, length <= 6)
@@ -94,27 +94,25 @@ PIN_POS = [
     (152.5, 65.5),
 ]
 
-# 4P4C modular jacks X1..X12 (MEBP 4-4S, datasheet "with split foot").
-# The STEP model contains a smaller jack, only its split-foot pegs match the
-# real part, so the jack envelope is built from the datasheet around the pegs.
+# 4P4C modular jacks X1..X12 (MEBP 4-4S). The STEP model contains a smaller
+# jack (11.5 mm high); height, width and flanges are taken from the datasheet,
+# the position of the jack fronts was measured on a test print.
 JACK_B = 11.18  # body width
 JACK_A = 13.72  # width over the panel-stop flanges
 JACK_H = 16.0  # height above the PCB
-JACK_DEPTH = 20.57
-JACK_PEG_TO_FRONT = 10.5  # split-foot pegs to the jack front
+JACK_PEG_TO_REAR = 10.07  # split-foot pegs to the rear end of the jack (datasheet)
 JACK_FLANGE = (1.2, 2.3)  # flange position behind the jack front (= panel thickness 1.2)
 JACK_RECESS = 0.1  # jack front behind the outer wall face
 JACK_Z0 = 0.8  # the jack body is raised above the PCB at its front (only the rear feet sit on it)
 JACK_SKIN = 1.0  # outer wall skin in front of the flanges (datasheet panel: 1.2, minus tolerance)
-# Measured on a test print: the back jacks X11/X12 sit ~0.5 mm deeper than the
-# footprint + datasheet suggest, the front jacks X1..X10 are flush.
-BACK_JACK_CORR = 0.4
 # (x center, y of the pegs, +1 = opening towards -y / front, -1 = towards +y / back)
 JACK_PITCH = (140.31 - 4.11) / 9.0
 FRONT_JACKS = [(9.71 + i * JACK_PITCH, 6.10) for i in range(10)]  # X1..X10
 BACK_JACKS = [(130.79, 79.90), (145.90, 79.90)]  # X12, X11
-FRONT_JACK_Y = FRONT_JACKS[0][1] - JACK_PEG_TO_FRONT  # jack front, -4.4
-BACK_JACK_Y = BACK_JACKS[0][1] + JACK_PEG_TO_FRONT - BACK_JACK_CORR  # jack front, 90.0
+# Jack fronts (measured: X1..X10 flush with a wall face at y = -2.3,
+# X11/X12 0.5 mm behind a wall face at y = 88.3).
+FRONT_JACK_Y = -2.3
+BACK_JACK_Y = 87.8
 FRONT_LABELS = [str(i + 1) for i in range(10)]
 
 # Other windows in the back wall, from the STEP model: (x_min, x_max, z_min, z_max).
@@ -157,9 +155,13 @@ IN_X0 = -CLR - END_GAP
 IN_X1 = PCB_W + CLR + END_GAP
 OUT_X0, OUT_X1 = IN_X0 - WALL, IN_X1 + WALL
 # Front and back walls are placed so the jack fronts end up flush with the outside.
+# The back jacks stick out less than WALL + CLR over the PCB edge, so the back
+# wall gets thinner instead of pushing the jacks behind the outer face.
 OUT_Y0 = FRONT_JACK_Y - JACK_RECESS
 OUT_Y1 = BACK_JACK_Y + JACK_RECESS
-IN_Y0, IN_Y1 = OUT_Y0 + WALL, OUT_Y1 - WALL
+IN_Y0 = min(OUT_Y0 + WALL, -CLR)
+IN_Y1 = max(OUT_Y1 - WALL, PCB_D + CLR)
+WALL_FRONT, WALL_BACK = IN_Y0 - OUT_Y0, OUT_Y1 - IN_Y1
 
 PCB_BOT = -PCB_T
 FLOOR_TOP = PCB_BOT - UNDER_PCB
@@ -167,7 +169,7 @@ BASE_BOT = FLOOR_TOP - FLOOR
 ROOF_BOT = MAX_PART_Z + TOP_CLEAR
 LID_TOP = ROOF_BOT + ROOF
 
-TOWER_X = [-CLR - 0.4 - TOWER_D / 2, PCB_W + CLR + 0.4 + TOWER_D / 2]
+TOWER_X = [-CLR - TOWER_D / 2, PCB_W + CLR + TOWER_D / 2]  # towers also locate the PCB in x
 TOWER_Y = [IN_Y0 + 8.0, IN_Y1 - 8.0]
 # Centers of the solid end blocks, moved 0.6 mm inwards to keep the outer wall thicker.
 MAGNET_X = [(OUT_X0 + LEDGE_W) / 2 + 0.6, (PCB_W - LEDGE_W + OUT_X1) / 2 - 0.6]
@@ -254,7 +256,8 @@ def tongues():
     solids = []
     for side, x0, x1, z0, _, d0, d1 in wall_cuts():
         if z0 >= SPLIT_Z + 1.0 and d0 < 0:
-            solids.append(wall_box(side, x0 + 0.3, x1 - 0.3, 0, WALL, SPLIT_Z - 0.1, z0))
+            t = WALL_FRONT if side == "front" else WALL_BACK
+            solids.append(wall_box(side, x0 + 0.3, x1 - 0.3, 0, t, SPLIT_Z - 0.1, z0))
     return solids
 
 
@@ -277,10 +280,10 @@ def make_base():
     # The jacks stick out over the front/back PCB edge, so the walls are further
     # out than the board. These rims locate the board edges (top stays below the
     # jack bodies, which start at the PCB top).
-    ledges += [
-        box(IN_X0, IN_X1, IN_Y0, -CLR, PCB_BOT, -0.3),
-        box(IN_X0, IN_X1, PCB_D + CLR, IN_Y1, PCB_BOT, -0.3),
-    ]
+    if -CLR - IN_Y0 > 0.4:
+        ledges.append(box(IN_X0, IN_X1, IN_Y0, -CLR, PCB_BOT, -0.3))
+    if IN_Y1 - PCB_D - CLR > 0.4:
+        ledges.append(box(IN_X0, IN_X1, PCB_D + CLR, IN_Y1, PCB_BOT, -0.3))
     for ledge in ledges:
         body = body.union(ledge)
 
@@ -481,10 +484,10 @@ def jack_envelopes():
     """Datasheet envelope (body + panel-stop flanges) of the 12 modular jacks, for check_fit.py."""
     solids = []
     for jacks, front, d in ((FRONT_JACKS, FRONT_JACK_Y, 1), (BACK_JACKS, BACK_JACK_Y, -1)):
-        for xc, _ in jacks:
+        for xc, peg in jacks:
             # Front part (wall region) is raised by JACK_Z0, the rear part sits on the PCB.
             ys_front = sorted((front, front + d * 3.0))
-            ys_rear = sorted((front + d * 3.0, front + d * JACK_DEPTH))
+            ys_rear = sorted((front + d * 3.0, peg + d * JACK_PEG_TO_REAR))
             fs = sorted((front + d * JACK_FLANGE[0], front + d * JACK_FLANGE[1]))
             solids.append(box(xc - JACK_B / 2, xc + JACK_B / 2, *ys_front, JACK_Z0, JACK_H).val())
             solids.append(box(xc - JACK_B / 2, xc + JACK_B / 2, *ys_rear, 0, JACK_H).val())

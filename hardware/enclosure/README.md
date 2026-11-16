@@ -21,7 +21,7 @@ the apra Rail DB housing described in [../hardware.md](../hardware.md).
 
 The modular jacks are shown as their datasheet envelope (dark boxes).
 
-Outer size: 173.8 x 94.6 x 37.0 mm (DIN clip: +6 mm height, screw tabs: +24 mm
+Outer size: 173.8 x 90.3 x 37.0 mm (DIN clip: +6 mm height, screw tabs: +24 mm
 length).
 
 ## Files
@@ -44,13 +44,14 @@ length).
 - The base and the lid meet 5 mm above the PCB top. All connector windows are
   split at that plane, so the PCB drops into the base from above and the lid
   is put on from above.
-- Valve jacks X1..X12 (4P4C, MEBP 4-4S): the walls are built from the jack
-  datasheet. The jack front sits flush with the outside (0.1 mm recess). The
-  outer skin is 1.0 mm thick (the panel stop flanges of the jacks expect up to
-  1.2 mm) and has a wider relief behind it for the flanges. The window starts
-  0.5 mm above the PCB, because the jack body is raised at its front.
-- The back jacks X11/X12 sit about 0.5 mm deeper than footprint and datasheet
-  suggest (measured on a test print); `BACK_JACK_CORR` compensates for it.
+- Valve jacks X1..X12 (4P4C, MEBP 4-4S): height and width are taken from the
+  datasheet, the position of the jack fronts was measured on a test print
+  (`FRONT_JACK_Y`, `BACK_JACK_Y`). The jack fronts sit flush with the outside
+  (0.1 mm recess). The jack windows start 0.5 mm above the PCB, because the
+  jack body is raised at its front. Behind a 1.0 mm outer skin the windows
+  are wider, for the panel-stop flanges of the jacks.
+- The back jacks stick out only ~1.8 mm over the PCB edge, so the back wall is
+  1.6 mm thick (front: 2.0 mm).
 - Front: windows for the jacks X1..X10, engraved with 1..10.
 - Back: windows for the RJ45 of the WT32-ETH01 (LAN), the pluggable terminals
   X18 (1-Wire), X17 (RS485), X19 (CAN), X13 (power) and the jacks X12/X11.
@@ -142,9 +143,8 @@ It reports every component that intersects a part and fails if there is any.
 
 - Designed from the C3-sample STEP model (`../c3-sample_3D.rar`) and the
   datasheet of the MEBP 4-4S jacks. The STEP model contains a smaller jack
-  (11.5 mm high, 1.8 mm overhang), only its pegs match the real part. The real
-  jacks are 16 mm high and stick out about 4.4 mm over the PCB edge; the enclosure
-  uses the datasheet values, and `check_fit.py` checks against both.
+  (11.5 mm high); the real jacks are 16 mm high. `check_fit.py` replaces the
+  model jacks by the datasheet envelope at the measured position.
 - The C2-sample uses the same schematic and connector layout (see the C2
   assembly drawing), but only the C3 model was checked. The C4-sample moved the
   RJ12 jacks closer to the board edge and is not covered.

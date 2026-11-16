@@ -8,8 +8,9 @@ Collision check of the enclosure against the PCB STEP model.
   3. python3 check_fit.py path/to/c3-sample_3D.step
 
 Reports every component that intersects the base, the lid or the DIN clip,
-and checks that each part is a single valid solid. The modular jacks are
-checked against their datasheet envelope in addition to the STEP model.
+and checks that each part is a single valid solid. The modular jacks of the
+STEP model are replaced by their datasheet envelope (the model has a smaller
+jack type).
 """
 
 import os
@@ -33,7 +34,11 @@ def load_components(path):
         shape = cq.Shape.cast(it.Value())
         bb = shape.BoundingBox()
         # The board itself (exported only 0.44 mm thick) is replaced by a 1.6 mm box below.
-        if not (bb.xlen > 150 and bb.ylen > 80 and bb.zlen < 1):
+        is_board = bb.xlen > 150 and bb.ylen > 80 and bb.zlen < 1
+        # The modular jacks of the model (11.2 x 18 x 15 mm incl. pegs) are not the
+        # real parts; they are replaced by the datasheet envelope from enclosure.py.
+        is_jack = abs(bb.xlen - 11.2) < 0.2 and abs(bb.ylen - 18.0) < 0.2 and abs(bb.zlen - 15.0) < 0.2
+        if not (is_board or is_jack):
             parts.append(shape)
         it.Next()
     return parts
@@ -79,7 +84,7 @@ def main():
     comps = load_components(sys.argv[1])
     pcb = cq.Solid.makeBox(enc.PCB_W, enc.PCB_D, enc.PCB_T, cq.Vector(0, 0, -enc.PCB_T))
     comps.append(pcb)
-    # The STEP model has smaller modular jacks than the real MEBP 4-4S: add the datasheet envelope.
+    # Datasheet envelope of the real MEBP 4-4S jacks instead of the model jacks.
     comps += enc.jack_envelopes()
     print(f"{len(comps)} component shapes loaded")
 
